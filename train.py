@@ -4,8 +4,8 @@ import argparse
 import tensorflow as tf
 import tensorflow.keras as keras
 
-from models.anynet import AnyNet, L1DisparityMaskLoss
-from dataset import DrivingDataset
+from tf_anynet.models.anynet import AnyNet, L1DisparityMaskLoss
+from tf_anynet.dataset import DrivingDataset, DrivingTFRecordsDataset
 
 
 SAMPLES=300
@@ -43,7 +43,7 @@ def main():
 
     tf.config.experimental_run_functions_eagerly(True)
 
-    ds = DrivingDataset(training=True)
+    ds = DrivingTFRecordsDataset(training=True)
     
     split = int(SAMPLES * .7)
     train_ds = ds.take(split)

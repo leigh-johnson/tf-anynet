@@ -1,3 +1,6 @@
+import click
+
+import numpy as np
 import tensorflow as tf
 
 from tf_anynet.dataset import DrivingDataset
@@ -47,8 +50,51 @@ def parse_uid(
       {disp_img_path}'
     )
 
+def decode_pfm_dims(disp_metadata):
+  ''' 
+    From: https://linux.die.net/man/5/pfm
+  '''
+  return (int(x) for x in disp_metadata[1].strip().split(b' '))
+
+def decode_pfm_channels(disp_metadata):
+  ''' 
+    From: https://linux.die.net/man/5/pfm
+
+    The identifier line contains the characters 'PF' or 'Pf'. 
+    PF means it's a color PFM. Pf means it's a grayscale PFM.
+
+  '''
+  channels = disp_metadata[0].strip()
+
+  if channels != b'Pf' and channels != b'PF':
+    raise Exception(f"Expected b'Pf' or b'PF' bytes for channels but got {channels}")
+  return 3 if channels == b'PF' else 1
+
+def decode_pfm_endian(disp_metadata):
+  if disp_metadata[-1].strip() == b'-1.0':
+    return '<'
+  elif disp_metadata[-1].strip() == b'1.0':
+    return '>'
+  raise Exception(f"Expected b'-1.0' or b'1.0' for endianess but got {disp_metadata[-1].strip()}")
+
 def parse_disp(disp_data):
-  return disp_data.numpy()[18]
+  raw_bytes = disp_data.numpy().split(b'\n')
+  disp_metadata = raw_bytes[:3]
+  raw_bytes = b'\n'.join(raw_bytes[3:])
+  
+  height, width = decode_pfm_dims(disp_metadata)
+  channels = decode_pfm_channels(disp_metadata)
+  endian = decode_pfm_endian(disp_metadata)
+  
+  dt = np.dtype(np.float32)
+  dt = dt.newbyteorder(endian)
+  
+  disp_img = np.frombuffer(raw_bytes, dtype=dt)
+  
+  disp_img = np.reshape(disp_img, (height, width, channels))
+  disp_img = np.flipud(disp_img)
+  return disp_img
+
 def create_tfexample(
    left_img_path,
    right_img_path, 
@@ -59,13 +105,13 @@ def create_tfexample(
   right_img = tf.io.read_file(right_img_path)
   disp_data = tf.io.read_file(disp_image_path)
 
-  disp_raw = parse_disp(disp_data)
+  disp_img = parse_disp(disp_data)
 
   uid = parse_uid(left_img_path, right_img_path, disp_image_path)
   image_shape = tf.image.decode_png(left_img).shape
   feature = {
       'uid': _bytes_feature(uid),
-      'disp_raw': _float_feature(disp_raw),
+      'disp_raw': _bytes_feature(disp_img.tobytes()),
       'disp_path': _bytes_feature(disp_image_path),
       'left_img_raw':  _bytes_feature(left_img),
       'left_img_path': _bytes_feature(left_img_path),
@@ -74,35 +120,41 @@ def create_tfexample(
       'height': _int64_feature(image_shape[0]),
       'width': _int64_feature(image_shape[1]),
       'img_channels': _int64_feature(image_shape[2]),
+      'disp_channels': _int64_feature(disp_img.shape[-1])
   }
 
   return tf.train.Example(features=tf.train.Features(feature=feature))
 
-def main():
+@click.group()
+def cli():
+  pass
+
+@cli.command()
+@click.option('-f', '--file', default='data/driving.tfrecords.gz')
+def pack(file):
   ds = DrivingDataset()
-  record_path='data/driving.tfrecords'
 
   writer_opts = tf.io.TFRecordOptions(
     compression_type="GZIP"
   )
+
   ds_length = sum(1 for x in ds.as_numpy_iterator())
 
-  with tf.io.TFRecordWriter(record_path, options=writer_opts) as writer:  
+  with tf.io.TFRecordWriter(file, options=writer_opts) as writer:  
     for i, (left_img_path, right_img_path, disp_image_path) in enumerate(ds.as_numpy_iterator()):
       tf_example = create_tfexample(left_img_path, right_img_path, disp_image_path)
       writer.write(tf_example.SerializeToString())
       if i % 100 == 0:
         print(f'Finished {i} / {ds_length}')
-  #return ds.map(create_tfexample)
-  #\
-    #.map(create_tfrecord)
 
+@cli.command()
 def shard():
   raw_dataset = tf.data.TFRecordDataset("data/driving.tfrecords.gz", compression_type="GZIP")
-  shards = 10
+  shards = 16
 
   for i in range(shards):
       writer = tf.data.experimental.TFRecordWriter(f"data/driving.tfrecords.shard-{i}.gz", compression_type="GZIP")
       writer.write(raw_dataset.shard(shards, i))
+
 if __name__ == '__main__':
-  shard()
+  cli()

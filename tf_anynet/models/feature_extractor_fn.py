@@ -2,35 +2,6 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 
-def conv3d_block(
-    filters, 
-    initializer_cls=keras.initializers.VarianceScaling, 
-    padding='same',
-    kernel_size=3, stride=1, momentum=0.9, epsilon=1e-5):
-    x = layers.BatchNorm3D(
-        momentum=momentum,
-        epsilon=epsilon
-    )
-    x = layers.Conv2D(
-        filters,
-        kernel_size=kernel_size,
-        strides=stride,
-        padding=padding,
-        use_bias=False,
-        activation='relu',
-        dilation_rate=dilation_rate,
-        kernel_initializer=initializer_cls()
-    )(x)
-    return x
-
-def conv3d_net(layers, filters):
-    net = conv3d_block(filters)
-    
-    for _ in range(layers):
-        net = conv3d_block(filters)(net)
-
-    return conv3d_block(1)(net)
-
 def conv2d_block(
     inputs,
     out_channels, 
@@ -64,7 +35,7 @@ def conv2d_block(
        return layers.Conv2D(
             out_channels,
             kernel_size=kernel_size,
-            strides=stride,
+            strides=strides,
             padding=padding,
             activation='relu',
             dilation_rate=dilation_rate,
@@ -276,8 +247,15 @@ class FeatureExtractor(keras.layers.Layer):
             blocks.append(unet)
 
         self.blocks = blocks
-
-        self.model = keras.Model(self.input_layer, blocks[-1])
+        
+        self.model = keras.Model(
+            inputs=self.input_layer, 
+            outputs=[
+                blocks[-i]
+                for i in
+                reversed(list(range(1, self.nblocks+2)))
+            ]
+        )
 
     def call(self, inputs):
         x = tf.expand_dims(inputs, 0, name=None)

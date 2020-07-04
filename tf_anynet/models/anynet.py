@@ -2,8 +2,10 @@
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+from tensorflow_addons.image import dense_image_warp
 
-from .feature_extractor_fn import FeatureExtractor, conv3d_net  
+from .regularization import Conv3DRegularizer
+from .feature_extractor_fn import FeatureExtractor
 
 class L1DisparityMaskLoss(object):
 
@@ -12,20 +14,25 @@ class L1DisparityMaskLoss(object):
         self.weights = weights
         self.stages = stages
         self.global_max_disp = global_max_disp
+        self.loss = keras.losses.Huber()
 
     def __call__(self, disp, logits):
         mask = disp < self.global_max_disp
-        import pdb; pdb.set_trace()
-        if tf.math.reduce_sum(mask) == 0:
-            raise Exception('disparty mask is empty and i have no idea why (: (should never happen)')
+        # if sum(mask) == 0:
+        #     raise Exception('disparty mask is empty and i have no idea why (: (should never happen)')
         
         # stop gradient backpropagation on mask
         mask = tf.stop_gradient(mask)
-        
+        logits = tf.expand_dims(logits, axis=-1)
+
+
         loss = [
-            self.weights[x] * keras.losses.huber(outputs[x][mask], disp[mask])
+            self.weights[x] * 
+            self.loss(
+                logits[x][mask], disp[mask])
             for x in range(self.stages)
         ]
+
         return sum(loss)
 
 
@@ -35,13 +42,19 @@ class DisparityRegression(keras.layers.Layer):
 
         self.disp = tf.reshape(
             tf.range(start*stride, end*stride, stride),
-            (1, -1, 1, 1)
+            (1, 1, -1)
         )
 
     def call(self, x):
-        disp = self.disp.repeat(x.size()[0], 1, x.size()[2], x.size()[3])
+        disp = tf.cast(
+            tf.tile(
+            self.disp,
+            multiples=(x.shape[0], x.shape[1],1),
+            ),
+            dtype=tf.float32
+        )
         return keras.backend.sum(
-            x * disp, axis=1, keepdims=True
+            x * disp, axis=-1, keepdims=True
         )
 
 class AnyNet(keras.Model):
@@ -79,10 +92,7 @@ class AnyNet(keras.Model):
         '''
         super(AnyNet, self).__init__()
 
-        
-        # right_img = keras.Input(shape=(3, input_dim[0], input_dim[1]), name="right_img_input")
-        # self.inputs = (left_img, right_img)
-        
+    
         self.loss_weights = loss_weights
         self.unet_conv2d_filters = unet_conv2d_filters
         self.unet_nblocks = unet_nblocks
@@ -104,18 +114,23 @@ class AnyNet(keras.Model):
             batch_size=batch_size
         )
 
-        # self.volume_postprocess = []
+        self.volume_postprocess = []
 
-        # for i in range(3):
-        #     net3d = conv3d_net(disp_conv3d_layers, disp_conv3d_filters*disp_conv3d_growth_rate[i])
-        #     self.volume_postprocess.append(net3d)       
+        for i in range(len(disp_conv3d_growth_rate)):
+            regularizer = Conv3DRegularizer(
+                self.disp_conv3d_layers,
+                self.disp_conv3d_filters*self.disp_conv3d_growth_rate[i]
+            ) 
+            # net3d = conv3d_net(disp_conv3d_layers, disp_conv3d_filters*disp_conv3d_growth_rate[i])
+            self.volume_postprocess.append(regularizer)       
 
     def test_step(self, data):
         (imgL, imgR), dispL = data
 
         # Compute predictions
-        logits = self(imgL, imgR, training=False)
+        logits = self([imgL, imgR], training=False)
         # Updates the metrics tracking the loss
+
         self.compiled_loss(dispL, logits)
         # Update the metrics.
         self.compiled_metrics.update_state(dispL, logits)
@@ -141,7 +156,8 @@ class AnyNet(keras.Model):
 
 
     def train_step(self, data):
-        (imgL, imgR), dispL = data
+
+        imgL, imgR, dispL = data
         #write_step_imgs(data)
 
         # Open a GradientTape to record the operations run
@@ -157,7 +173,8 @@ class AnyNet(keras.Model):
             # Compute the loss value for this minibatch.
             # loss_value = self.compiled_loss(logits, dispL, regularization_losses=self.losses)
             # @todo calculate regularization losses
-            import pdb; pdb.set_trace()
+
+            #import pdb; pdb.set_trace()
             loss = self.compiled_loss(
                 dispL, 
                 logits
@@ -179,82 +196,175 @@ class AnyNet(keras.Model):
         x: [B, H, W, C] (img2)
         optical  flow: [B, 2, H, W] 
         '''
+        return dense_image_warp(x, disp)
 
-        B, H, W, C = x.shape()
+        #B, H, W, C = x.shape
 
-        xx = tf.range(0, W).reshape(1, -1).repeat(H, 1)
-        yy = tf.range(0, H).reshape(-1, 1).repeat(1, W)
-        xx = xx.reshape(1, 1, H, W).repeat(B, 1, 1, 1)
-        yy = yy.reshape(1, 1, H, W).repeat(B, 1, 1, 1)
-        vgrid = tf.concat((xx, yy), 1)
 
-        vgrid[:,:1,:,:] = vgrid[:,:1,:,:] - disp
-        vgrid[:, 0, :, :] = 2.0 * vgrid[:, 0, :, :].clone() / max(W - 1, 1) - 1.0
-        vgrid[:, 1, :, :] = 2.0 * vgrid[:, 1, :, :].clone() / max(H - 1, 1) - 1.0
-        
-        vgrid = vgrid.permute(0, 2, 3, 1)
-        output = nn.functional.grid_sample(x, vgrid)
-        return output
-    def _build_volume_2d3(self, feat_l, feat_r, maxdisp, disp, stride=1):
-        size = feat_l.shape()
-        batch_disp = disp[:,None,:,:,:].repeat(1, maxdisp*2-1, 1, 1, 1).reshape(-1,1,size[-2], size[-1])
-        batch_shift = tf.range(-maxdisp+1, maxdisp).repeat(size[0])[:,None,None,None] * stride
-        batch_disp = batch_disp - batch_shift
-        batch_feat_l = feat_l[:,None,:,:,:].repeat(1,maxdisp*2-1, 1, 1, 1).reshape(-1,size[-3],size[-2], size[-1])
-        batch_feat_r = feat_r[:,None,:,:,:].repeat(1,maxdisp*2-1, 1, 1, 1).reshape(-1,size[-3],size[-2], size[-1])
-        
-        cost = tf.norm(batch_feat_l - self.warp(batch_feat_r, batch_disp), ord=1, axis=-1)
-        cost = cost.reshape(size[0],-1, size[2],size[3])
-        return cost
-
-    def call(self, imgs):
-        left_img, right_img = imgs
         #import pdb; pdb.set_trace()
 
-        #img_size = left_img.shape()
+        # xx = tf.range(0, W).reshape(1, -1).repeat(H, 1)
+        # yy = tf.range(0, H).reshape(-1, 1).repeat(1, W)
+        # xx = xx.reshape(1, H, W, 1).repeat(B, 1, 1, 1)
+        # yy = yy.reshape(1, H, W, 1).repeat(B, 1, 1, 1)
+        # vgrid = tf.concat((xx, yy), 1)
+
+        # vgrid[:,:,:,:1] = vgrid[:,:,:,:1] - disp
+
+        # vgrid[:, 0, :, :] = 2.0 * vgrid[:, 0, :, :].clone() / max(W - 1, 1) - 1.0
+        # vgrid[:, 1, :, :] = 2.0 * vgrid[:, 1, :, :].clone() / max(H - 1, 1) - 1.0
+        
+        # vgrid = vgrid.permute(0, 2, 3, 1)
+        # output = nn.functional.grid_sample(x, vgrid)
+        # return output
+
+    def _build_volume_2d3(self, feat_l, feat_r, maxdisp, disp, stride=1):
+        
+        size = feat_l.shape
+
+        batch_disp = tf.tile(
+            disp[:,:,:,:,None],
+            multiples=(1, 1, 1, 1, maxdisp*2-1)
+        )
+
+        batch_disp = tf.reshape(batch_disp, (-1, size[1], size[2], 1))
+        #.repeat(1, maxdisp*2-1, 1, 1, 1).reshape(-1,1,size[-2], size[-1])
+        
+        batch_shift = tf.tile(
+            tf.range(-maxdisp+1, maxdisp),
+            multiples=(size[0],)
+        )[:,None,None,None] * stride
+
+        batch_shift = tf.cast(batch_shift, dtype=tf.float32)
+
+
+        batch_disp = batch_disp - batch_shift
+
+        batch_feat_l = tf.tile(
+            feat_l[:,:,:,:,None],
+            multiples=(1, 1, 1, 1, maxdisp*2-1)
+        )
+        batch_feat_l = tf.reshape(batch_feat_l,
+            (-1, size[1], size[2], size[3])
+        )
+
+        batch_feat_r = tf.tile(
+            feat_r[:,:,:,:,None],
+            multiples=(1, 1, 1, 1, maxdisp*2-1)
+        )
+        batch_feat_r = tf.reshape(batch_feat_r,
+            (-1, size[1], size[2], size[3])
+        )
+        # TensorShape([1, 33, 59, 12])
+        norm = tf.linalg.norm(batch_feat_l - self.warp(batch_feat_r, batch_disp), ord=1, axis=-1)
+
+        cost = tf.reshape(norm, (size[0],size[1],size[2], -1))
+        return cost
+
+    def _build_volume_2d(self, feat_l, feat_r, maxdisp, stride=1):
+        assert maxdisp % stride == 0  # Assume maxdisp is multiple of stride
+
+        cost = tf.Variable(
+            tf.zeros((feat_l.shape[0], feat_l.shape[1], feat_l.shape[2], maxdisp//stride))
+        )
+        
+
+        for i in range(0, maxdisp, stride):
+            reduced = tf.reduce_sum(
+                tf.math.abs(feat_l[:, :, :i, :]),
+                axis=-1
+            )
+            cost[:, :, :i, i//stride].assign(reduced)
+            if i > 0:
+                _, norm = tf.linalg.normalize(
+                    feat_l[:, :, i:, :] - feat_r[:, :, :-i, :], 
+                    ord=1, 
+                    axis=-1
+                )
+                cost[:, :, i:, i//stride].assign(
+                    tf.squeeze(norm, axis=-1)
+                )
+            else:
+                _, norm = tf.linalg.normalize(
+                    feat_l[:, :, :, :] - feat_r[:, :, :, :], 
+                    ord=1, 
+                    axis=-1
+                )
+                cost[:, :, i:, i//stride].assign(
+                    tf.squeeze(norm, axis=-1)
+                )
+
+        return cost
+        
+    def call(self, imgs):
+        left_img, right_img = imgs
+
+        img_size = left_img.shape
         
         feats_l = self.feature_extractor(left_img)
         feats_r = self.feature_extractor(right_img)
-        return [feats_l, feats_r]
-        #pred = []
 
-        # for scale in range(len(feats_l)):
-        #     if scale > 0:
-        #         wflow = layers.UpSampling3D(
-        #             pred[scale-1],
-        #             size=(feats_l[scale].size(1), feats_l[scale].size(2)),
-        #             interpolation='bilinear',
-        #             ) * feats_l[scale].size(1) / img_size[2]
+        pred = []
 
-        #         cost = self._build_volume_2d3(feats_l[scale], feats_r[scale],
-        #                                  self.local_max_disps[scale], wflow, stride=1)
-        #     else:
-        #         cost = self._build_volume_2d(feats_l[scale], feats_r[scale],
-        #                                      self.local_max_disps[scale], stride=1)
-        #     cost = tf.expand_dims(cost, -1)
-        #     cost = self.volume_postprocess[scale](cost)
-        #     cost = cost.squeeze(-1)
+        for scale in range(len(feats_l)):
+            if scale > 0:
+
+                wflow = tf.image.resize(
+                    pred[scale-1], 
+                    (feats_l[scale].shape[1], feats_l[scale].shape[2]
+                )) * feats_l[scale].shape[1] / img_size[1]
+
+                wflow = tf.expand_dims(wflow, axis=0)
+
+                cost = self._build_volume_2d3(
+                    feats_l[scale], feats_r[scale],
+                    self.local_max_disps[scale], wflow)
+            else:
+                cost = self._build_volume_2d(feats_l[scale], feats_r[scale],
+                                             self.local_max_disps[scale])
+            cost = tf.expand_dims(cost, -1)
+            cost = self.volume_postprocess[scale](cost)
+            cost = tf.squeeze(cost)
             
-        #     softmax = layers.Softmax(axis=-1)(-cost)
+            softmax = layers.Softmax(axis=-1)(-cost)
 
-        #     if scale == 0:
-        #         pred_low_res = DisparityRegression(0, self.local_max_disps[scale])(softmax)
-        #         pred_low_res = pred_low_res * img_size[2] / pred_low_res.size(1)
-        #         disp_up = layers.UpSampling3D(
-        #             pred_low_res,
-        #             size=(img_size[2], img_size[3]),
-        #             mode='bilinear'
-        #         )
-        #         pred.append(disp_up)
-        #     else:
-        #         pred_low_res = DisparityRegression(self.local_max_disps[scale]+1, self.local_max_disps[scale], stride=1)(softmax)
-        #         pred_low_res = pred_low_res * img_size[2] / pred_low_res.size(1)
-        #         disp_up = layers.UpSampling3D(
-        #             pred_low_res,
-        #             size=(img_size[2], img_size[3]),
-        #             mode='bilinear'
-        #         )
-        #         pred.append(disp_up+pred[scale-1])
+            if scale == 0:
+                pred_low_res = DisparityRegression(0, self.local_max_disps[scale])(softmax)
+                # pred_low_res = tf.expand_dims(
+                #     pred_low_res * img_size[0] / pred_low_res.shape[-1],
+                #     axis=0
+                # )
+
+                disp_up = tf.image.resize(pred_low_res, img_size[:2])
+
+                #import pdb; pdb.set_trace()
+
+                # disp_up = layers.UpSampling2D(
+                #     size=(
+                #         pred_low_res.shape[1]//img_size[0], 
+                #         img_size[1]//pred_low_res.shape[2]
+                #     ),
+                #     interpolation='bilinear'
+                # )(pred_low_res)
+                
+                pred.append(disp_up)
+            else:
+
+                pred_low_res = DisparityRegression(-self.local_max_disps[scale]+1, self.local_max_disps[scale])(softmax)
+                disp_up = tf.image.resize(pred_low_res, img_size[:2])
+
+                # pred_low_res = tf.expand_dims(
+                #     pred_low_res * img_size[0] / pred_low_res.shape[-1],
+                #     axis=0
+                # )
+                # disp_up = layers.UpSampling2D(
+                #     size=(
+                #         pred_low_res.shape[1]//img_size[0], 
+                #         pred_low_res.shape[2]//img_size[1],
+                #     ),
+                #     interpolation='bilinear'
+                # )(pred_low_res)
+                pred.append(disp_up+pred[scale-1])
         
-        # # @todo calculate regularization losses
-        # return pred
+        # @todo calculate regularization losses
+        return tf.convert_to_tensor(pred, dtype=tf.float32)
