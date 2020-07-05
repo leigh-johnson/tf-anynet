@@ -5,7 +5,7 @@ from tensorflow.keras import layers
 from tensorflow_addons.image import dense_image_warp
 
 from .regularization import Conv3DRegularizer
-from .feature_extractor_fn import FeatureExtractor
+from .feature_extractor import FeatureExtractor
 
 class L1DisparityMaskLoss(object):
 
@@ -17,19 +17,18 @@ class L1DisparityMaskLoss(object):
         self.loss = keras.losses.Huber()
 
     def __call__(self, disp, logits):
-        mask = disp < self.global_max_disp
+        mask = disp[0] < self.global_max_disp
         # if sum(mask) == 0:
         #     raise Exception('disparty mask is empty and i have no idea why (: (should never happen)')
         
         # stop gradient backpropagation on mask
+        #import pdb; pdb.set_trace()
         mask = tf.stop_gradient(mask)
-        logits = tf.expand_dims(logits, axis=-1)
-
 
         loss = [
             self.weights[x] * 
             self.loss(
-                logits[x][mask], disp[mask])
+                logits[x][mask], disp[x][mask])
             for x in range(self.stages)
         ]
 
@@ -42,14 +41,14 @@ class DisparityRegression(keras.layers.Layer):
 
         self.disp = tf.reshape(
             tf.range(start*stride, end*stride, stride),
-            (1, 1, -1)
+            (1, 1, 1, -1)
         )
 
     def call(self, x):
         disp = tf.cast(
             tf.tile(
             self.disp,
-            multiples=(x.shape[0], x.shape[1],1),
+            multiples=(x.shape[0], x.shape[1],x.shape[2],1),
             ),
             dtype=tf.float32
         )
@@ -73,6 +72,7 @@ class AnyNet(keras.Model):
         input_dim=(256, 512), # height, width
         stages=3,
         batch_size=8,
+        eval_samples=None,
         *args, **kwargs
         ):
         '''AnyNet keras implementation
@@ -105,6 +105,8 @@ class AnyNet(keras.Model):
         self.learning_rate = learning_rate
         self.input_dim = input_dim
         self.stages = stages
+        self.eval_samples = eval_samples# .map(lambda imgL,imgR,disp: (imgL, imgR))
+        #self.eval_gt = eval_samples.map(lambda imgL,imgR,disp: disp)
         #self.batch_size = 
 
         self.feature_extractor  = FeatureExtractor(
@@ -125,35 +127,20 @@ class AnyNet(keras.Model):
             self.volume_postprocess.append(regularizer)       
 
     def test_step(self, data):
-        (imgL, imgR), dispL = data
+        imgL, imgR, dispL = data
 
         # Compute predictions
+        disp = tf.tile(tf.expand_dims(dispL, axis=0), multiples=(3,1,1,1,1))
+        
         logits = self([imgL, imgR], training=False)
         # Updates the metrics tracking the loss
 
-        self.compiled_loss(dispL, logits)
+        self.compiled_loss(disp, logits)
         # Update the metrics.
-        self.compiled_metrics.update_state(dispL, logits)
+        self.compiled_metrics.update_state(disp, logits)
         # Return a dict mapping metric names to current value.
         # Note that it will include the loss (tracked in self.metrics).
         return {m.name: m.result() for m in self.metrics}
-
-    def write_step_imgs(self, data):
-        (imgL, imgR), dispL = data
-        imgL = tf.image.encode_png(
-            imgL, compression=-1
-        )
-        tf.io.write_file(
-            '', contents, name=None
-        )
-        imgR = tf.image.encode_png(
-            imgR, compression=-1
-        )
-
-        dispL = tf.image.encode_png(
-            dispL, compression=-1
-        )
-
 
     def train_step(self, data):
 
@@ -162,21 +149,24 @@ class AnyNet(keras.Model):
 
         # Open a GradientTape to record the operations run
         # during the forward pass, which enables autodifferentiation.
+        
+        # tile dispL to match shape of logits
+        disp = tf.tile(tf.expand_dims(dispL, axis=0), multiples=(3,1,1,1,1))
+
         with tf.GradientTape() as tape:
 
             # Run the forward pass of the layer.
             # The operations that the layer applies
             # to its inputs are going to be recorded
             # on the GradientTape.
+
             logits = self([imgL, imgR], training=True)  # Logits for this minibatch
 
             # Compute the loss value for this minibatch.
             # loss_value = self.compiled_loss(logits, dispL, regularization_losses=self.losses)
             # @todo calculate regularization losses
-
-            #import pdb; pdb.set_trace()
             loss = self.compiled_loss(
-                dispL, 
+                disp, 
                 logits
             )
 
@@ -186,56 +176,30 @@ class AnyNet(keras.Model):
         # Update weights
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
         # Update metrics (includes the metric that tracks the loss)
-        self.compiled_metrics.update_state(dispL, logits)
+        self.compiled_metrics.update_state(disp, logits)
         # Return a dict mapping metric names to current value
         return {m.name: m.result() for m in self.metrics}
 
     def warp(self, x, disp):
-        '''
-            Warp img2 back to img1
-        x: [B, H, W, C] (img2)
-        optical  flow: [B, 2, H, W] 
-        '''
         return dense_image_warp(x, disp)
-
-        #B, H, W, C = x.shape
-
-
-        #import pdb; pdb.set_trace()
-
-        # xx = tf.range(0, W).reshape(1, -1).repeat(H, 1)
-        # yy = tf.range(0, H).reshape(-1, 1).repeat(1, W)
-        # xx = xx.reshape(1, H, W, 1).repeat(B, 1, 1, 1)
-        # yy = yy.reshape(1, H, W, 1).repeat(B, 1, 1, 1)
-        # vgrid = tf.concat((xx, yy), 1)
-
-        # vgrid[:,:,:,:1] = vgrid[:,:,:,:1] - disp
-
-        # vgrid[:, 0, :, :] = 2.0 * vgrid[:, 0, :, :].clone() / max(W - 1, 1) - 1.0
-        # vgrid[:, 1, :, :] = 2.0 * vgrid[:, 1, :, :].clone() / max(H - 1, 1) - 1.0
-        
-        # vgrid = vgrid.permute(0, 2, 3, 1)
-        # output = nn.functional.grid_sample(x, vgrid)
-        # return output
 
     def _build_volume_2d3(self, feat_l, feat_r, maxdisp, disp, stride=1):
         
         size = feat_l.shape
-
+        
         batch_disp = tf.tile(
             disp[:,:,:,:,None],
             multiples=(1, 1, 1, 1, maxdisp*2-1)
         )
 
         batch_disp = tf.reshape(batch_disp, (-1, size[1], size[2], 1))
-        #.repeat(1, maxdisp*2-1, 1, 1, 1).reshape(-1,1,size[-2], size[-1])
         
         batch_shift = tf.tile(
             tf.range(-maxdisp+1, maxdisp),
             multiples=(size[0],)
         )[:,None,None,None] * stride
 
-        batch_shift = tf.cast(batch_shift, dtype=tf.float32)
+        batch_shift = tf.cast(batch_shift, tf.float32)
 
 
         batch_disp = batch_disp - batch_shift
@@ -255,7 +219,7 @@ class AnyNet(keras.Model):
         batch_feat_r = tf.reshape(batch_feat_r,
             (-1, size[1], size[2], size[3])
         )
-        # TensorShape([1, 33, 59, 12])
+
         norm = tf.linalg.norm(batch_feat_l - self.warp(batch_feat_r, batch_disp), ord=1, axis=-1)
 
         cost = tf.reshape(norm, (size[0],size[1],size[2], -1))
@@ -275,6 +239,7 @@ class AnyNet(keras.Model):
                 axis=-1
             )
             cost[:, :, :i, i//stride].assign(reduced)
+            # @todo graph norms or publish as metrics
             if i > 0:
                 _, norm = tf.linalg.normalize(
                     feat_l[:, :, i:, :] - feat_r[:, :, :-i, :], 
@@ -297,7 +262,9 @@ class AnyNet(keras.Model):
         return cost
         
     def call(self, imgs):
+        
         left_img, right_img = imgs
+
 
         img_size = left_img.shape
         
@@ -308,13 +275,10 @@ class AnyNet(keras.Model):
 
         for scale in range(len(feats_l)):
             if scale > 0:
-
                 wflow = tf.image.resize(
                     pred[scale-1], 
                     (feats_l[scale].shape[1], feats_l[scale].shape[2]
                 )) * feats_l[scale].shape[1] / img_size[1]
-
-                wflow = tf.expand_dims(wflow, axis=0)
 
                 cost = self._build_volume_2d3(
                     feats_l[scale], feats_r[scale],
@@ -330,41 +294,15 @@ class AnyNet(keras.Model):
 
             if scale == 0:
                 pred_low_res = DisparityRegression(0, self.local_max_disps[scale])(softmax)
-                # pred_low_res = tf.expand_dims(
-                #     pred_low_res * img_size[0] / pred_low_res.shape[-1],
-                #     axis=0
-                # )
 
-                disp_up = tf.image.resize(pred_low_res, img_size[:2])
-
-                #import pdb; pdb.set_trace()
-
-                # disp_up = layers.UpSampling2D(
-                #     size=(
-                #         pred_low_res.shape[1]//img_size[0], 
-                #         img_size[1]//pred_low_res.shape[2]
-                #     ),
-                #     interpolation='bilinear'
-                # )(pred_low_res)
-                
+                disp_up = tf.image.resize(pred_low_res, img_size[1:3])
                 pred.append(disp_up)
             else:
 
                 pred_low_res = DisparityRegression(-self.local_max_disps[scale]+1, self.local_max_disps[scale])(softmax)
-                disp_up = tf.image.resize(pred_low_res, img_size[:2])
-
-                # pred_low_res = tf.expand_dims(
-                #     pred_low_res * img_size[0] / pred_low_res.shape[-1],
-                #     axis=0
-                # )
-                # disp_up = layers.UpSampling2D(
-                #     size=(
-                #         pred_low_res.shape[1]//img_size[0], 
-                #         pred_low_res.shape[2]//img_size[1],
-                #     ),
-                #     interpolation='bilinear'
-                # )(pred_low_res)
+                disp_up = tf.image.resize(pred_low_res, img_size[1:3])
                 pred.append(disp_up+pred[scale-1])
         
         # @todo calculate regularization losses
-        return tf.convert_to_tensor(pred, dtype=tf.float32)
+        self.depth_map = tf.convert_to_tensor(pred, dtype=tf.float32)
+        return self.depth_map

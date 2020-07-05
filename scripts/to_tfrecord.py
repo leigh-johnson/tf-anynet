@@ -82,7 +82,7 @@ def parse_disp(disp_data):
   disp_metadata = raw_bytes[:3]
   raw_bytes = b'\n'.join(raw_bytes[3:])
   
-  height, width = decode_pfm_dims(disp_metadata)
+  width, height = decode_pfm_dims(disp_metadata)
   channels = decode_pfm_channels(disp_metadata)
   endian = decode_pfm_endian(disp_metadata)
   
@@ -92,27 +92,35 @@ def parse_disp(disp_data):
   disp_img = np.frombuffer(raw_bytes, dtype=dt)
   
   disp_img = np.reshape(disp_img, (height, width, channels))
+
   disp_img = np.flipud(disp_img)
   return disp_img
 
 def create_tfexample(
    left_img_path,
    right_img_path, 
-   disp_image_path
+   disp_img_path
   ):
 
   left_img = tf.io.read_file(left_img_path)
   right_img = tf.io.read_file(right_img_path)
-  disp_data = tf.io.read_file(disp_image_path)
+  disp_data = tf.io.read_file(disp_img_path)
 
   disp_img = parse_disp(disp_data)
 
-  uid = parse_uid(left_img_path, right_img_path, disp_image_path)
+  # this was a sanity check
+  # disp_png_path = tf.strings.split(disp_img_path, sep='.')[0].numpy().decode('utf-8')
+
+  # import imageio
+  # disp_png_path = disp_png_path + '.png'
+  # imageio.imwrite(disp_png_path, disp_img)
+
+  uid = parse_uid(left_img_path, right_img_path, disp_img_path)
   image_shape = tf.image.decode_png(left_img).shape
   feature = {
       'uid': _bytes_feature(uid),
       'disp_raw': _bytes_feature(disp_img.tobytes()),
-      'disp_path': _bytes_feature(disp_image_path),
+      'disp_path': _bytes_feature(disp_img_path),
       'left_img_raw':  _bytes_feature(left_img),
       'left_img_path': _bytes_feature(left_img_path),
       'right_img_raw': _bytes_feature(right_img),
@@ -141,8 +149,8 @@ def pack(file):
   ds_length = sum(1 for x in ds.as_numpy_iterator())
 
   with tf.io.TFRecordWriter(file, options=writer_opts) as writer:  
-    for i, (left_img_path, right_img_path, disp_image_path) in enumerate(ds.as_numpy_iterator()):
-      tf_example = create_tfexample(left_img_path, right_img_path, disp_image_path)
+    for i, (left_img_path, right_img_path, disp_img_path) in enumerate(ds.as_numpy_iterator()):
+      tf_example = create_tfexample(left_img_path, right_img_path, disp_img_path)
       writer.write(tf_example.SerializeToString())
       if i % 100 == 0:
         print(f'Finished {i} / {ds_length}')

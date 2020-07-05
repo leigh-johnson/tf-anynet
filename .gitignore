@@ -3,6 +3,8 @@
 # Edit at https://www.toptal.com/developers/gitignore?templates=python
 
 data/
+logs/
+logs-bak/
 ### Python ###
 # Byte-compiled / optimized / DLL files
 __pycache__/

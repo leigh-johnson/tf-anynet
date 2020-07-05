@@ -25,7 +25,7 @@ def random_crop(tfrecord, training=True):
     
     disp_img = tf.reshape(
         tf.io.decode_raw(tfrecord['disp_raw'], tf.float32),
-        [FULL_H, FULL_W, tfrecord['disp_channels']]
+        [FULL_H, FULL_W, 1]
     )
     # crop to TRAIN_H, TRAIN_W
     if training:
@@ -113,4 +113,9 @@ class DrivingTFRecordsDataset(tf.data.Dataset):
         return ds\
             .map(deserialize_tfrecord)\
             .map(random_crop)
-    
+
+if __name__ == '__main__':
+    ds = DrivingTFRecordsDataset(training=True)
+
+    import pdb; pdb.set_trace()
+    print(len(ds))
