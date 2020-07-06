@@ -33,65 +33,40 @@ def plot_to_image(img_data, per_image_standardization=False):
 
 
 class DepthMapImageCallback(keras.callbacks.Callback):
-    def __init__(self, log_dir='.logs/', frequency=1):
+    def __init__(self, eval_data, log_dir='.logs/', frequency=1):
         super(DepthMapImageCallback, self).__init__()
         self.frequency = frequency
         self.log_dir = log_dir
         self.writer = tf.summary.create_file_writer(self.log_dir+'/img')
-
+        self.eval_data = eval_data
 
     def on_epoch_end(self, epoch, logs=None):
-        samples = tuple(self.model.eval_samples.as_numpy_iterator())
+
+        samples = tuple(self.eval_data.as_numpy_iterator())
 
 
-        if self.model.eval_samples and epoch == 0:
+        if self.eval_data and epoch == 0:
             with self.writer.as_default():
-                # for i, data in enumerate(samples):
-                    
-                #     tag = f'{i}-input'
-                #     tf.summary.image(tag,), step=epoch)
+                for i, ((imgL,imgR), disp) in enumerate(samples):
 
-                #     self.writer.flush()
-                for i, data in enumerate(samples):
-
-                    static =  [ data[0], data[1] ]
-                    # static =  [ plot_to_image(samples[i][2])]
                     tag = f'{i}-input'
-                    tf.summary.image(tag, static, step=epoch)
-                    # tf.summary.image(tag, tf.expand_dims(data[0], axis=0), step=epoch)
-                    # tag = f'img-{i}-R'
-                    # tf.summary.image(tag, tf.expand_dims(data[1], axis=0), step=epoch)
+                    tf.summary.image(tag, (imgL,imgR), step=epoch)
                     self.writer.flush()
 
 
-        if self.model.eval_samples and epoch % self.frequency == 0:
+        if self.eval_data and epoch % self.frequency == 0:
             preds = self.model.predict([
-                 tf.constant([x[0] for x in samples]),
-                 tf.constant([x[1] for x in samples])
+                 tf.constant([x[0][0] for x in samples]),
+                 tf.constant([x[0][1] for x in samples])
                 ])
-            # nblocks=3, batch_size, H, W, C
 
             with self.writer.as_default():
                 for i in range(0, len(preds[1])):
-                    # normalize and encode as a jpg
-                    # normalized_pred = tf.image.per_image_standardization(pred)
                     tag = f'{i}-output'
-                    #import pdb; pdb.set_trace()
-                    # imgs = tf.concat(
-                    #     pred + tf.expand_dims([samples[i][0], samples[i][1], samples[i][2]], axis=0)
-                    
-                    # static =  [ samples[i][0], samples[i][1]]
-                    # tf.summary.image(tag, static, step=epoch, max_outputs=10)
-                    # self.writer.flush()
-
-                    #tf.summary.image(tag, tf.expand_dims(plot_to_image(samples[i][2]), 0), step=epoch, max_outputs=10)
-                    #self.writer.flush()
-
-                    imgsplot = [ plot_to_image(samples[i][2]) ] + [plot_to_image(data, per_image_standardization=True) for data in preds[:,i]] 
-                
+                    imgsplot = [ 
+                        plot_to_image(samples[i][1]) ] \
+                        + [plot_to_image(data, per_image_standardization=True) 
+                        for data in preds[:,i]
+                    ]
                     tf.summary.image(tag, imgsplot, step=epoch, max_outputs=10)
-                    #for j, data in enumerate(pred):
-                        
-                        
                     self.writer.flush()
-

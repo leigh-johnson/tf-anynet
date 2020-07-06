@@ -7,14 +7,16 @@ import tensorflow as tf
 import tensorflow.keras as keras
 
 from tf_anynet.models.callbacks import DepthMapImageCallback
-from tf_anynet.models.anynet import AnyNet, L1DisparityMaskLoss
+from tf_anynet.models.anynet_fn import AnyNet
+from tf_anynet.models.metrics import RootMeanSquaredError, L1DisparityMaskLoss
 from tf_anynet.dataset import DrivingDataset, DrivingTFRecordsDataset
 
 
-SAMPLES=200
+SAMPLES=2200
 
 def parse_args():
     parser = argparse.ArgumentParser(description='AnyNet with Flyingthings3d')
+    parser.add_argument('--seed', type=int, default=12345, help='Random seed (training dataset shuffle)')
     parser.add_argument('--global_max_disp', type=int, default=192, help='Global maximum disparity (pixels)')
     parser.add_argument('--local_max_disps', type=int, nargs='+', default=[12, 3, 3], help='Maximum disparity localized per Disparity Net stage')
     parser.add_argument('--loss_weights', type=float, nargs='+', default=[0.25, 0.5, 1., 1.])
@@ -50,15 +52,24 @@ def main():
     tf.config.experimental_run_functions_eagerly(True)
 
     ds = DrivingTFRecordsDataset(training=True)
+    ds = ds.map(lambda imgL, imgR, dispL: ((imgL, imgR), dispL))
     
-    split = int(SAMPLES * .7)
-    train_ds = ds.take(split).batch(args.train_bsize)
-    test_ds = ds.take(split).batch(args.train_bsize)
-    eval_samples = ds.take(args.train_bsize)
+    train_size = int(0.7 * SAMPLES)
 
+    ds = ds.shuffle(SAMPLES//4, seed=args.seed, reshuffle_each_iteration=False)
+
+    train_ds = ds.take(train_size).batch(args.train_bsize)
     
-
-    model = AnyNet(batch_size=args.train_bsize, eval_samples=eval_samples)
+    test_ds = ds.skip(train_size).batch(args.train_bsize)
+    val_ds = ds.skip(train_size).take(args.train_bsize)
+    
+    model_builder = AnyNet(
+        batch_size=args.train_bsize, 
+        eval_data=val_ds
+    )
+    
+    input_shape = train_ds.element_spec[0][0].shape
+    model = model_builder.build(input_shape=input_shape)
 
     optimizer = keras.optimizers.Adam(learning_rate=args.learning_rate)
     
@@ -70,7 +81,7 @@ def main():
         log_dir = f'./logs/{log_dir}'
 
     metrics = [
-        tf.keras.metrics.RootMeanSquaredError()
+        RootMeanSquaredError()
     ]
 
     model.compile(
@@ -84,7 +95,7 @@ def main():
     )
 
     callbacks = [
-        DepthMapImageCallback(log_dir=log_dir),
+        DepthMapImageCallback(val_ds, log_dir=log_dir),
         keras.callbacks.TensorBoard(
             log_dir=log_dir,
             #histogram_freq=5
@@ -100,10 +111,10 @@ def main():
 
     if args.resume:
         #checkpoint = os.path.join(log_dir, args.checkpoint)
-        model = keras.models.load_model(args.checkpoint)
+        model = keras.models(args.checkpoint)
 
-
-    model.fit(train_ds, 
+    model.fit(
+        train_ds,
         epochs=args.epochs, 
         batch_size=args.train_bsize,
         validation_data=test_ds,

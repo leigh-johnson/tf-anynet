@@ -60,6 +60,14 @@ class Conv3DRegularizer(keras.layers.Layer):
         self.nlayers = nlayers
         self.out_channels = out_channels
     
+    def get_config(self):
+        config = {
+            'nlayers': self.nlayers,
+            'out_channels': self.out_channels
+        }
+        config.update(super().get_config())
+        return config
+
     def build(self, input_shapes):
 
         inputs = layers.Input(shape=input_shapes[1:])

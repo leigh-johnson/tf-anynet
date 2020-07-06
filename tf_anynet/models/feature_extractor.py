@@ -81,7 +81,7 @@ class UnetUp2(keras.layers.Layer):
         return self.model(inputs)
 
 class FeatureExtractor(keras.layers.Layer):
-    def __init__(self, init_filters, nblocks, input_dim, batch_size):
+    def __init__(self, init_filters, nblocks, batch_size):
         '''Downsample inputs, extract features, upsample extracted features
 
             Args:
@@ -97,9 +97,17 @@ class FeatureExtractor(keras.layers.Layer):
         self.initializer_cls = keras.initializers.VarianceScaling
         self.init_filters = init_filters
         self.nblocks = nblocks
-        self.input_dim = input_dim
         self.batch_size = batch_size
 
+    def get_config(self):
+        config = {
+            'init_filters': self.init_filters,
+            'nblocks': self.nblocks,
+            'batch_size': self.batch_size
+        }
+        config.update(super().get_config())
+
+        return config
     def build(self, input_shape):
  
         self.input_layer = layers.Input(shape=input_shape[1:], batch_size=input_shape[0])
