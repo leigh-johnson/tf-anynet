@@ -79,7 +79,7 @@ def main():
         .prefetch(1)
     
 
-    val_ds = test_ds.take(args.train_bsize)
+    val_ds = test_ds.skip(args.train_bsize).take(args.train_bsize)
     test_ds = test_ds.batch(args.train_bsize, drop_remainder=True).prefetch(1)
     
     model_builder = AnyNet(
