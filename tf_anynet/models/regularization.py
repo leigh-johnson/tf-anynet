@@ -51,7 +51,7 @@ def conv3d_net(inputs, layers, out_channels):
 
     return conv3d_block(net, 1)
 
-
+@keras.utils.register_keras_serializable(package='AnyNet')
 class Conv3DRegularizer(keras.layers.Layer):
 
     def __init__(self, nlayers, out_channels):
@@ -70,7 +70,7 @@ class Conv3DRegularizer(keras.layers.Layer):
 
     def build(self, input_shapes):
 
-        inputs = layers.Input(shape=input_shapes[1:])
+        inputs = layers.Input(shape=input_shapes[1:], name="input_conv3d_regularizer")
         self.conv3d_net = conv3d_net(inputs, self.nlayers, self.out_channels)
         self.model = keras.Model(inputs, self.conv3d_net)
 

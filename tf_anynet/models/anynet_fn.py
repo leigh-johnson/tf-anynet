@@ -7,7 +7,7 @@ from tensorflow_addons.image import dense_image_warp
 from .dispnet import DisparityNetwork
 from .feature_extractor import FeatureExtractor
 
-
+#@keras.utils.register_keras_serializable(package='AnyNet')
 class AnyNet(object):
     def __init__(self, 
         unet_conv2d_filters=1,
@@ -75,8 +75,8 @@ class AnyNet(object):
     def build(self, input_shape):
         
         # import pdb; pdb.set_trace()
-        left_img = keras.Input(shape=input_shape[1:])
-        right_img = keras.Input(shape=input_shape[1:])
+        left_img = keras.Input(shape=input_shape[1:], name="input_left_img")
+        right_img = keras.Input(shape=input_shape[1:], name="input_right_img")
 
         _, height, width, _ = input_shape
         
@@ -86,4 +86,12 @@ class AnyNet(object):
         self.disparity_network.height = height
         self.disparity_network.width = width
         output = self.disparity_network([feats_l, feats_r ])
-        return keras.Model([left_img, right_img], output)
+        return keras.Model([left_img, right_img], output, name="anynet")
+    
+    # def get_config(self):
+    #     config = {
+    #         'init_filters': self.init_filters,
+    #         'nblocks': self.nblocks,
+    #         'batch_size': self.batch_size
+    #     }
+    #     return config

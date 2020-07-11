@@ -5,8 +5,7 @@ from tensorflow_addons.image import dense_image_warp
 
 from .regularization import Conv3DRegularizer
 
-
-
+@keras.utils.register_keras_serializable(package='AnyNet')
 class DisparityNetwork(keras.layers.Layer):
 
     def __init__(self, 
@@ -34,7 +33,12 @@ class DisparityNetwork(keras.layers.Layer):
         self.height = None
         self.cost2d = None
 
+        self.bnorm0 = None
+        self.bnorm1 = None
+        self.bnorm2 = None
+
         self.volume_postprocess = []
+        self.bnorms = [keras.layers.BatchNormalization() for n in range(0,stages)]
 
         for i in range(len(disp_conv3d_growth_rate)):
             regularizer = Conv3DRegularizer(
@@ -56,7 +60,7 @@ class DisparityNetwork(keras.layers.Layer):
         }
         config.update(super().get_config())
         return config
-        
+
     def warp(self, x, disp):
         return dense_image_warp(x, disp)
 
@@ -172,7 +176,7 @@ class DisparityNetwork(keras.layers.Layer):
                 start = -self.local_max_disps[scale]+1
                 end = self.local_max_disps[scale]
                 pred_low_res = DisparityRegression(start, end)(softmax)
-
+                pred_low_res = self.bnorms[scale](pred_low_res)
                 disp_up = tf.image.resize(pred_low_res, [ self.height, self.width ])
                 pred.append(disp_up+pred[scale-1])
             else:
@@ -186,12 +190,14 @@ class DisparityNetwork(keras.layers.Layer):
                 pred_low_res = DisparityRegression(
                     0, self.local_max_disps[scale]
                 )(softmax)
+                pred_low_res = self.bnorms[scale](pred_low_res)
                 disp_up = tf.image.resize(pred_low_res, [self.height, self.width])
                 pred.append(disp_up)
 
         pred = tf.convert_to_tensor(pred, dtype=tf.float32)
         return pred
 
+@keras.utils.register_keras_serializable(package='AnyNet')
 class DisparityRegression(keras.layers.Layer):
     def __init__(self, start, end, stride=1):
         super(DisparityRegression, self).__init__()

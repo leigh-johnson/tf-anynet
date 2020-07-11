@@ -42,6 +42,7 @@ def conv2d_block(
             kernel_initializer=initializer_cls()
         )(inputs)
 
+@keras.utils.register_keras_serializable(package='AnyNet')
 class UnetUp2(keras.layers.Layer):
     def __init__(self, out_channels):
         super(UnetUp2, self).__init__()
@@ -56,8 +57,8 @@ class UnetUp2(keras.layers.Layer):
     def build(self, input_shapes):
         input_shape1, input_shape2 = input_shapes
 
-        self.input_layer1 = layers.Input(shape=input_shape1[1:], batch_size=input_shape1[0])
-        self.input_layer2 = layers.Input(shape=input_shape2[1:], batch_size=input_shape2[0])
+        self.input_layer1 = layers.Input(shape=input_shape1[1:], batch_size=input_shape1[0], name="input_unet_0")
+        self.input_layer2 = layers.Input(shape=input_shape2[1:], batch_size=input_shape2[0], name="input_unet_1")
         
         outputs2 = layers.UpSampling2D(
             size=2, interpolation='bilinear',
@@ -80,6 +81,7 @@ class UnetUp2(keras.layers.Layer):
 
         return self.model(inputs)
 
+@keras.utils.register_keras_serializable(package='AnyNet')
 class FeatureExtractor(keras.layers.Layer):
     def __init__(self, init_filters, nblocks, batch_size):
         '''Downsample inputs, extract features, upsample extracted features
@@ -110,7 +112,7 @@ class FeatureExtractor(keras.layers.Layer):
         return config
     def build(self, input_shape):
  
-        self.input_layer = layers.Input(shape=input_shape[1:], batch_size=input_shape[0])
+        self.input_layer = layers.Input(shape=input_shape[1:], batch_size=input_shape[0], name="input_feature_ext")
 
         self.block0 = self._make_block0(
             self.init_filters,

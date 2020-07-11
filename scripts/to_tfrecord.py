@@ -3,7 +3,13 @@ import click
 import numpy as np
 import tensorflow as tf
 
-from tf_anynet.dataset import DrivingDataset
+from tf_anynet.dataset import DrivingDataset, FlyingThingsTestDataset, FlyingThingsTrainDataset
+
+DATASETS = {
+  'driving': DrivingDataset,
+  'flyingthings_train': FlyingThingsTrainDataset,
+  'flyingthings_test': FlyingThingsTestDataset
+}
 
 def _bytes_feature(value):
   """Returns a bytes_list from a string / byte."""
@@ -138,9 +144,11 @@ def cli():
   pass
 
 @cli.command()
+@click.option('--dataset', default='driving')
 @click.option('-f', '--file', default='data/driving.tfrecords.gz')
-def pack(file):
-  ds = DrivingDataset()
+def pack(dataset, file):
+
+  ds = DATASETS[dataset]()
 
   writer_opts = tf.io.TFRecordOptions(
     compression_type="GZIP"
@@ -155,14 +163,17 @@ def pack(file):
       if i % 100 == 0:
         print(f'Finished {i} / {ds_length}')
 
+@click.option('-f', '--file', default='data/flyingthings_test.tfrecords.gz')
+@click.option('--shards', default=8)
 @cli.command()
-def shard():
-  raw_dataset = tf.data.TFRecordDataset("data/driving.tfrecords.gz", compression_type="GZIP")
-  shards = 16
+def shard(file, shards):
+  raw_dataset = tf.data.TFRecordDataset(file, compression_type="GZIP")
 
   for i in range(shards):
-      writer = tf.data.experimental.TFRecordWriter(f"data/driving.tfrecords.shard-{i}.gz", compression_type="GZIP")
+      outfile = file.split('.')[0] + f'.shard-{i}.gz'
+      writer = tf.data.experimental.TFRecordWriter(outfile.format(shard=i), compression_type="GZIP")
       writer.write(raw_dataset.shard(shards, i))
+      print(f'Finished {i+1}/{shards}')
 
 if __name__ == '__main__':
   cli()
