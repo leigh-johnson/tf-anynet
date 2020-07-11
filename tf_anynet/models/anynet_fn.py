@@ -86,12 +86,7 @@ class AnyNet(object):
         self.disparity_network.height = height
         self.disparity_network.width = width
         output = self.disparity_network([feats_l, feats_r ])
-        return keras.Model([left_img, right_img], output, name="anynet")
+        return keras.Model([left_img, right_img], {
+            f'disparity-{i}': x for i,x in enumerate(output)
+        }, name="anynet")
     
-    # def get_config(self):
-    #     config = {
-    #         'init_filters': self.init_filters,
-    #         'nblocks': self.nblocks,
-    #         'batch_size': self.batch_size
-    #     }
-    #     return config

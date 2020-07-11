@@ -9,8 +9,7 @@ import tensorflow.keras as keras
 from tf_anynet.models.callbacks import DepthMapImageCallback
 from tf_anynet.models.anynet_fn import AnyNet
 from tf_anynet.models.metrics import (
-    RootMeanSquaredError, L1DisparityMaskLoss,
-    MeanAbsolutePercentageError
+    L1DisparityMaskLoss,
 )
 from tf_anynet.dataset import TFRecordsDataset
 
@@ -100,17 +99,25 @@ def main():
         log_dir = f'./logs/{log_dir}'
 
     metrics = [
-        RootMeanSquaredError(),
-        MeanAbsolutePercentageError()
+        keras.metrics.RootMeanSquaredError(),
+        keras.metrics.MeanAbsolutePercentageError()
+        #RootMeanSquaredError(),
+        #MeanAbsolutePercentageError()
     ]
 
     model.compile(
         optimizer=optimizer,
-        loss=L1DisparityMaskLoss(
-            args.loss_weights,
-            stages,
-            args.global_max_disp
-        ),
+        loss={
+            f'disparity-{i}': L1DisparityMaskLoss(
+                i,
+                args.global_max_disp
+                )
+            for i in range(0, stages)
+        },
+        loss_weights={
+            f'disparity-{i}': args.loss_weights[i]
+            for i in range(0, stages)
+        },
         metrics=metrics
     )
 

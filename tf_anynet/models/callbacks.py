@@ -59,14 +59,16 @@ class DepthMapImageCallback(keras.callbacks.Callback):
                  tf.constant([x[0][0] for x in samples]),
                  tf.constant([x[0][1] for x in samples])
                 ])
-
+            #import pdb; pdb.set_trace()
+            values = preds.values()
             with self.writer.as_default():
-                for i in range(0, len(preds[1])):
+                for i in range(0, len(samples)):
                     tag = f'{i}-output'
+
                     imgsplot = [ 
                         plot_to_image(samples[i][1]) ] \
-                        + [plot_to_image(data)#, per_image_standardization=True) 
-                        for data in preds[:,i]
+                        + [plot_to_image(v[i])#, per_image_standardization=True) 
+                        for v in values
                     ]
                     tf.summary.image(tag, imgsplot, step=epoch, max_outputs=10)
                     self.writer.flush()

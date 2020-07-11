@@ -33,10 +33,6 @@ class DisparityNetwork(keras.layers.Layer):
         self.height = None
         self.cost2d = None
 
-        self.bnorm0 = None
-        self.bnorm1 = None
-        self.bnorm2 = None
-
         self.volume_postprocess = []
         self.bnorms = [keras.layers.BatchNormalization() for n in range(0,stages)]
 
@@ -176,7 +172,7 @@ class DisparityNetwork(keras.layers.Layer):
                 start = -self.local_max_disps[scale]+1
                 end = self.local_max_disps[scale]
                 pred_low_res = DisparityRegression(start, end)(softmax)
-                pred_low_res = self.bnorms[scale](pred_low_res)
+                #pred_low_res = self.bnorms[scale](pred_low_res)
                 disp_up = tf.image.resize(pred_low_res, [ self.height, self.width ])
                 pred.append(disp_up+pred[scale-1])
             else:
@@ -190,11 +186,11 @@ class DisparityNetwork(keras.layers.Layer):
                 pred_low_res = DisparityRegression(
                     0, self.local_max_disps[scale]
                 )(softmax)
-                pred_low_res = self.bnorms[scale](pred_low_res)
+                #pred_low_res = self.bnorms[scale](pred_low_res)
                 disp_up = tf.image.resize(pred_low_res, [self.height, self.width])
                 pred.append(disp_up)
 
-        pred = tf.convert_to_tensor(pred, dtype=tf.float32)
+        pred = [self.bnorms[i](x) for i,x in enumerate(pred)]
         return pred
 
 @keras.utils.register_keras_serializable(package='AnyNet')
