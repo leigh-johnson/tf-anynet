@@ -16,12 +16,12 @@ FULL_H = 540
 def random_crop(tfrecord, training=True):
 
 
-    left_img = tf.image.decode_png(tfrecord['left_img_raw'], channels=3)
-    right_img = tf.image.decode_png(tfrecord['right_img_raw'], channels=3)
+    left_img = tf.image.decode_raw(tfrecord['left_img_raw'], tf.float32)
+    right_img = tf.image.decode_raw(tfrecord['right_img_raw'], tf.float32)
 
     # 3D float32 [0, 1]
-    left_img = tf.image.convert_image_dtype(left_img, tf.float32)
-    right_img = tf.image.convert_image_dtype(right_img, tf.float32)
+    # left_img = tf.image.convert_image_dtype(left_img, tf.float32)
+    # right_img = tf.image.convert_image_dtype(right_img, tf.float32)
     
     disp_img = tf.reshape(
         tf.io.decode_raw(tfrecord['disp_raw'], tf.float32),

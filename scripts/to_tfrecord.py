@@ -109,7 +109,17 @@ def create_tfexample(
   ):
 
   left_img = tf.io.read_file(left_img_path)
+  left_img = tf.image.decode_png(left_img)
+  image_shape = left_img.shape
+
+  left_img = tf.image.convert_image_dtype(left_img, tf.float32)
+  left_img = left_img.numpy().tobytes()
+
   right_img = tf.io.read_file(right_img_path)
+  right_img = tf.image.decode_png(right_img)
+  right_img = tf.image.convert_image_dtype(right_img, tf.float32)
+  right_img = right_img.numpy().tobytes()
+
   disp_data = tf.io.read_file(disp_img_path)
 
   disp_img = parse_disp(disp_data)
@@ -122,7 +132,6 @@ def create_tfexample(
   # imageio.imwrite(disp_png_path, disp_img)
 
   uid = parse_uid(left_img_path, right_img_path, disp_img_path)
-  image_shape = tf.image.decode_png(left_img).shape
   feature = {
       'uid': _bytes_feature(uid),
       'disp_raw': _bytes_feature(disp_img.tobytes()),
