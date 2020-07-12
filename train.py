@@ -99,10 +99,8 @@ def main():
         log_dir = f'./logs/{log_dir}'
 
     metrics = [
-        keras.metrics.RootMeanSquaredError(),
-        keras.metrics.MeanAbsolutePercentageError()
-        #RootMeanSquaredError(),
-        #MeanAbsolutePercentageError()
+        keras.metrics.RootMeanSquaredError(name="rmse"),
+        keras.metrics.MeanAbsolutePercentageError(name="mape")
     ]
 
     model.compile(
