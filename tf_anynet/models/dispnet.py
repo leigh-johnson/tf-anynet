@@ -14,14 +14,12 @@ class DisparityNetwork(keras.layers.Layer):
         disp_conv3d_growth_rate=[4, 1, 1],
         local_max_disps=[12, 3, 3],
         global_max_disp=192,
-        loss_weights=(0.25, 0.5, 1.0, 1.0),
         stages=3,
         batch_size=8,
         *args, **kwargs
         ):
         super(DisparityNetwork, self).__init__()
 
-        self.loss_weights = loss_weights
         self.disp_conv3d_filters = disp_conv3d_filters
         self.disp_conv3d_layers = disp_conv3d_layers
         self.disp_conv3d_growth_rate = disp_conv3d_growth_rate
@@ -50,7 +48,6 @@ class DisparityNetwork(keras.layers.Layer):
             'disp_conv3d_growth_rate': self.disp_conv3d_growth_rate,
             'local_max_disps': self.local_max_disps,
             'global_max_disp': self.global_max_disp,
-            'loss_weights': self.loss_weights,
             'stages': self.stages,
             'batch_size': self.batch_size
         }
@@ -60,6 +57,7 @@ class DisparityNetwork(keras.layers.Layer):
     def warp(self, x, disp):
         return dense_image_warp(x, disp)
 
+    
     def _build_volume_2d(self, feat_l, feat_r, maxdisp, stride=1):
         assert maxdisp % stride == 0  # Assume maxdisp is multiple of stride
 
