@@ -172,6 +172,6 @@ class TFRecordsDataset(tf.data.Dataset):
             shuffle=False
             )
         
-        ds = tf.data.TFRecordDataset(files, compression_type='GZIP', num_parallel_reads=tf.data.experimental.AUTOTUNE)
+        ds = tf.data.TFRecordDataset(files, compression_type='GZIP', num_parallel_reads=12)
         return ds\
-            .map(to_x_y, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+            .map(to_x_y, num_parallel_calls=4)

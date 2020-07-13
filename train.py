@@ -26,13 +26,13 @@ def parse_args():
                         help='datapath')
     parser.add_argument('--epochs', type=int, default=1000,
                         help='number of epochs to train')
-    parser.add_argument('--train_bsize', type=int, default=192,
+    parser.add_argument('--train_bsize', type=int, default=256,
                         help='batch size for training')
     parser.add_argument('--resume', type=str, default=None,
                         help='resume path')
     parser.add_argument('--checkpoint', type=str, default=None,
                         help='resume path')                        
-    parser.add_argument('--learning_rate', type=float, default=5e-4,
+    parser.add_argument('--learning_rate', type=float, default=1e-3,
                         help='learning rate')
     parser.add_argument('--with_spn', action='store_true', help='with spn network or not')
     parser.add_argument('--unet_conv2d_filters', type=int, default=1, help='Initial num Conv2D output filters of Unet feature extractor')
@@ -66,19 +66,17 @@ def main():
     
     # test_ds = ds.skip(train_size).batch(args.train_bsize)
     # val_ds = ds.skip(train_size).take(args.train_bsize).batch(args.train_bsize)
-
+    train_cache_file = args.train_ds.split('.')[0]
     train_ds = TFRecordsDataset(args.train_ds, training=True)\
-        .cache(f'cache/{args.train_ds}.cache')\
-        .map(random_crop, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
-        .shuffle(args.train_bsize*2, reshuffle_each_iteration=True)\
+        .map(random_crop, num_parallel_calls=4)\
+        .shuffle(args.train_bsize*8, reshuffle_each_iteration=True)\
         .batch(args.train_bsize,drop_remainder=True)\
-        .prefetch(tf.data.experimental.AUTOTUNE)
-
+        .prefetch(3)
+    test_cache_file = args.test_ds.split('.')[0]
     test_ds  = TFRecordsDataset(args.test_ds, training=True)\
-        .map(center_crop, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
-        .cache(f'cache/{args.test_ds}.cache')\
+        .map(center_crop, num_parallel_calls=4)\
         .batch(args.train_bsize, drop_remainder=True)\
-        .prefetch(tf.data.experimental.AUTOTUNE)
+        .prefetch(3)
     
 
     val_ds = test_ds.take(1)
@@ -139,11 +137,11 @@ def main():
     )
 
     callbacks = [
-        DepthMapImageCallback(val_ds, args.train_bsize, args.train_bsize//8, log_dir=log_dir),
+        DepthMapImageCallback(val_ds, args.train_bsize, 32, log_dir=log_dir),
         keras.callbacks.TensorBoard(
             log_dir=log_dir,
             histogram_freq=5,
-            profile_batch=5
+            profile_batch='60,70'
         ),
         tf.keras.callbacks.ModelCheckpoint(
             filepath=log_dir+'/model.{epoch:02d}-{val_loss:.2f}.hdf5',
