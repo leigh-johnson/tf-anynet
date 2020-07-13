@@ -176,7 +176,7 @@ def pack(dataset, file):
 @click.option('--shards', default=8)
 @cli.command()
 def shard(file, shards):
-  raw_dataset = tf.data.TFRecordDataset(file, compression_type="GZIP")
+  raw_dataset = tf.data.TFRecordDataset(file, compression_type="GZIP", num_parallel_reads=tf.data.experimental.AUTOTUNE)
 
   for i in range(shards):
       outfile = file.split('.')[0] + f'.shard-{i}.gz'

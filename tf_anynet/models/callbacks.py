@@ -33,36 +33,37 @@ def plot_to_image(img_data, per_image_standardization=False):
 
 
 class DepthMapImageCallback(keras.callbacks.Callback):
-    def __init__(self, eval_data, log_dir='.logs/', frequency=1):
+    def __init__(self, eval_data, batch_size, max_outputs, log_dir='.logs/', frequency=1):
         super(DepthMapImageCallback, self).__init__()
         self.frequency = frequency
         self.log_dir = log_dir
         self.writer = tf.summary.create_file_writer(self.log_dir+'/img')
         self.eval_data = eval_data
+        self.batch_size = batch_size
+        self.max_outputs = max_outputs
 
     def on_epoch_end(self, epoch, logs=None):
-
-        samples = tuple(self.eval_data.as_numpy_iterator())
-
+        
+        eval_data = self.eval_data.unbatch()
 
         if self.eval_data and epoch == 0:
             with self.writer.as_default():
-                for i, ((imgL,imgR), disp) in enumerate(samples):
-
-                    tag = f'{i}-input'
-                    tf.summary.image(tag, (imgL,imgR), step=epoch)
-                    self.writer.flush()
-
-
+                for i, ((imgL,imgR), disp) in eval_data.enumerate():
+                    if i < self.max_outputs:
+                        tag = f'{i}-input'
+                        tf.summary.image(tag, (imgL,imgR), step=epoch)
+                        self.writer.flush()
+                    else:
+                        break
+        
         if self.eval_data and epoch % self.frequency == 0:
-            preds = self.model.predict([
-                 tf.constant([x[0][0] for x in samples]),
-                 tf.constant([x[0][1] for x in samples])
-                ])
+            samples = tuple(eval_data.as_numpy_iterator())
+            #imgs = self.eval_data.map(lambda x,y: x)
             #import pdb; pdb.set_trace()
+            preds = self.model.predict(self.eval_data)
             values = preds.values()
             with self.writer.as_default():
-                for i in range(0, len(samples)):
+                for i in range(0, self.max_outputs):
                     tag = f'{i}-output'
 
                     imgsplot = [ 

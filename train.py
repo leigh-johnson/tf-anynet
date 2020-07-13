@@ -11,7 +11,7 @@ from tf_anynet.models.anynet_fn import AnyNet
 from tf_anynet.models.metrics import (
     L1DisparityMaskLoss,
 )
-from tf_anynet.dataset import TFRecordsDataset
+from tf_anynet.dataset import TFRecordsDataset, random_crop, center_crop, to_x_y
 
 
 SAMPLES=2200
@@ -20,16 +20,14 @@ def parse_args():
     parser = argparse.ArgumentParser(description='AnyNet with Flyingthings3d')
     parser.add_argument('--seed', type=int, default=12345, help='Random seed (training dataset shuffle)')
     parser.add_argument('--global_max_disp', type=int, default=192, help='Global maximum disparity (pixels)')
-    parser.add_argument('--local_max_disps', type=int, nargs='+', default=[12, 24, 48], help='Maximum disparity localized per Disparity Net stage')
+    parser.add_argument('--local_max_disps', type=int, nargs='+', default=[12,3,3], help='Maximum disparity localized per Disparity Net stage')
     parser.add_argument('--loss_weights', type=float, nargs='+', default=[0.25, 0.5, 1., 1.])
     parser.add_argument('--datapath', default='dataset/',
                         help='datapath')
     parser.add_argument('--epochs', type=int, default=1000,
                         help='number of epochs to train')
-    parser.add_argument('--train_bsize', type=int, default=20,
-                        help='batch size for training (default: 6)')
-    parser.add_argument('--test_bsize', type=int, default=1,
-                        help='batch size for testing (default: 1)')
+    parser.add_argument('--train_bsize', type=int, default=192,
+                        help='batch size for training')
     parser.add_argument('--resume', type=str, default=None,
                         help='resume path')
     parser.add_argument('--checkpoint', type=str, default=None,
@@ -37,19 +35,21 @@ def parse_args():
     parser.add_argument('--learning_rate', type=float, default=5e-4,
                         help='learning rate')
     parser.add_argument('--with_spn', action='store_true', help='with spn network or not')
-    parser.add_argument('--unet_cond2d_filters', type=int, default=1, help='Initial num Conv2D output filters of Unet feature extractor')
-    parser.add_argument('--nblocks', type=int, default=2, help='number of blocks in each conv stage')
+    parser.add_argument('--unet_conv2d_filters', type=int, default=1, help='Initial num Conv2D output filters of Unet feature extractor')
+    parser.add_argument('--unet_nblocks', type=int, default=2, help='number of blocks in each conv stage')
     parser.add_argument('--disp_conv3d_filters', type=int, default=4, help='Initial num Conv3D output filters of Disparity Network (multiplied by growth_rate[stage_num])')
     parser.add_argument('--disp_conv3d_layers', type=int, default=4, help='Num Conv3D layers of Disparty Network')
     parser.add_argument('--disp_conv3d_growth_rate', type=int, nargs='+', default=[4,1,1], help='growth rate in the 3d network')
-    parser.add_argument('--spn_init_filters', type=int, default=8, help='initial channels for spnet')
+    parser.add_argument('--cspn_conv3d_filters', type=int, default=8, help='initial channels for spnet')
+    parser.add_argument('--cspn_conv3d_step', type=int, default=24, help='initial channels for spnet')
     parser.add_argument('--train_ds', type=str, default='flyingthings_train.shard*')
     parser.add_argument('--test_ds', type=str, default='flyingthings_test.shard*')
     return parser.parse_args()
 
-def to_x_y(imgL, imgR, disp):
-    return ((imgL, imgR), disp)
 def main():
+    physical_devices = tf.config.list_physical_devices('GPU')
+    tf.config.experimental.set_memory_growth(physical_devices[0], True)
+    
     args = parse_args()
     stages = 3 + args.with_spn
 
@@ -68,22 +68,30 @@ def main():
     # val_ds = ds.skip(train_size).take(args.train_bsize).batch(args.train_bsize)
 
     train_ds = TFRecordsDataset(args.train_ds, training=True)\
-        .map(to_x_y, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
-        .shuffle(args.train_bsize*4, reshuffle_each_iteration=True)\
+        .cache(f'cache/{args.train_ds}.cache')\
+        .map(random_crop, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+        .shuffle(args.train_bsize*2, reshuffle_each_iteration=True)\
         .batch(args.train_bsize,drop_remainder=True)\
-        .prefetch(1)
+        .prefetch(tf.data.experimental.AUTOTUNE)
 
     test_ds  = TFRecordsDataset(args.test_ds, training=True)\
-        .map(to_x_y, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
-        .prefetch(1)
+        .map(center_crop, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+        .cache(f'cache/{args.test_ds}.cache')\
+        .batch(args.train_bsize, drop_remainder=True)\
+        .prefetch(tf.data.experimental.AUTOTUNE)
     
 
-    val_ds = test_ds.skip(args.train_bsize).take(args.train_bsize)
-    test_ds = test_ds.batch(args.train_bsize, drop_remainder=True).prefetch(1)
+    val_ds = test_ds.take(1)
     
     model_builder = AnyNet(
         batch_size=args.train_bsize, 
-        eval_data=val_ds
+        unet_conv2d_filters=args.unet_conv2d_filters,
+        unet_nblocks=args.unet_nblocks,
+        cspn_conv3d_filters=args.cspn_conv3d_filters,
+        local_max_disps=args.local_max_disps,
+        global_max_disp=args.global_max_disp,
+        loss_weights=args.loss_weights,
+        stages=stages,
     )
     
     input_shape = train_ds.element_spec[0][0].shape
@@ -98,10 +106,21 @@ def main():
         log_dir = str(datetime.now()).replace(' ', 'T')
         log_dir = f'./logs/{log_dir}'
 
-    metrics = [
-        keras.metrics.RootMeanSquaredError(name="rmse"),
-        keras.metrics.MeanAbsolutePercentageError(name="mape")
-    ]
+    
+    # metrics = [
+    #     keras.metrics.RootMeanSquaredError(name="rmse"),
+    # ]
+
+    rmse0 = keras.metrics.RootMeanSquaredError(name="rmse_0")
+    rmse1 = keras.metrics.RootMeanSquaredError(name="rmse_1")
+    rmse2 = keras.metrics.RootMeanSquaredError(name="rmse_2")
+    rmse_agg = keras.metrics.RootMeanSquaredError(name="rmse_agg")
+
+    metrics = {
+        'disparity-0': [rmse0, rmse_agg],
+        'disparity-1': [rmse1, rmse_agg],
+        'disparity-2': [rmse2, rmse_agg],
+    }
 
     model.compile(
         optimizer=optimizer,
@@ -120,10 +139,11 @@ def main():
     )
 
     callbacks = [
-        DepthMapImageCallback(val_ds, log_dir=log_dir),
+        DepthMapImageCallback(val_ds, args.train_bsize, args.train_bsize//8, log_dir=log_dir),
         keras.callbacks.TensorBoard(
             log_dir=log_dir,
-            histogram_freq=5
+            histogram_freq=5,
+            profile_batch=5
         ),
         tf.keras.callbacks.ModelCheckpoint(
             filepath=log_dir+'/model.{epoch:02d}-{val_loss:.2f}.hdf5',

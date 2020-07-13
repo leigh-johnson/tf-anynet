@@ -4,24 +4,25 @@ from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow_addons.image import dense_image_warp
 
+#from .cspn import ConvSpatialPropagationNet
 from .dispnet import DisparityNetwork
 from .feature_extractor import FeatureExtractor
 
 #@keras.utils.register_keras_serializable(package='AnyNet')
-class AnyNet(object):
+class AnyNet(object): 
     def __init__(self, 
         unet_conv2d_filters=1,
         unet_nblocks=2,
-        spn_conv2d_filters=8,
+        with_cspn=None,
+        cspn_conv3d_filters=8,
+        cspn_conv3d_step=24,
         disp_conv3d_filters=4,
         disp_conv3d_layers=4,
         disp_conv3d_growth_rate=[4, 1, 1],
         local_max_disps=[12, 3, 3],
         global_max_disp=192,
-        loss_weights=(0.25, 0.5, 1.0, 1.0),
-        learning_rate=5e-4,
         stages=3,
-        batch_size=8,
+        batch_size=None,
         eval_data=None,
         *args, **kwargs
         ):
@@ -41,18 +42,16 @@ class AnyNet(object):
                 keras.Model
         '''
     
-        self.loss_weights = loss_weights
         self.unet_conv2d_filters = unet_conv2d_filters
         self.unet_nblocks = unet_nblocks
-        self.spn_conv2d_filters = spn_conv2d_filters
         self.disp_conv3d_filters = disp_conv3d_filters
         self.disp_conv3d_layers = disp_conv3d_layers
         self.disp_conv3d_growth_rate = disp_conv3d_growth_rate
+        self.cspn_conv3d_filters = cspn_conv3d_filters
+        self.with_cspn = with_cspn      
         self.local_max_disps = local_max_disps
         self.global_max_disp = global_max_disp
-        self.learning_rate = learning_rate
         self.stages = stages
-        self.eval_data = eval_data
         self.batch_size = batch_size
 
         self.feature_extractor  = FeatureExtractor(
@@ -67,10 +66,15 @@ class AnyNet(object):
             disp_conv3d_growth_rate= disp_conv3d_growth_rate,
             local_max_disps=local_max_disps,
             global_max_disp=global_max_disp,
-            loss_weights=loss_weights,
             stages=stages,
             batch_size=batch_size
         )
+
+        # if with_cspn:
+        #     self.cspnet = ConvSpatialPropagationNet(
+        #         cspn_conv2d_filters,
+        #         cspn_conv2d_step
+        #     )
 
     def build(self, input_shape):
         
