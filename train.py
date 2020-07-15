@@ -68,15 +68,15 @@ def main():
     # val_ds = ds.skip(train_size).take(args.train_bsize).batch(args.train_bsize)
     train_cache_file = args.train_ds.split('.')[0]
     train_ds = TFRecordsDataset(args.train_ds, training=True)\
-        .map(random_crop, num_parallel_calls=8)\
-        .shuffle(args.train_bsize*10, reshuffle_each_iteration=True)\
+        .map(random_crop, num_parallel_calls=4)\
+        .shuffle(args.train_bsize*8, reshuffle_each_iteration=True)\
         .batch(args.train_bsize,drop_remainder=True)\
-        .prefetch(1)
+        .prefetch(3)
     test_cache_file = args.test_ds.split('.')[0]
     test_ds  = TFRecordsDataset(args.test_ds, training=True)\
-        .map(center_crop, num_parallel_calls=8)\
+        .map(center_crop, num_parallel_calls=4)\
         .batch(args.train_bsize, drop_remainder=True)\
-        .prefetch(1)
+        .prefetch(3)
     
 
     val_ds = test_ds.take(1)
@@ -137,7 +137,7 @@ def main():
     )
 
     callbacks = [
-        DepthMapImageCallback(val_ds, args.train_bsize, args.train_bsize//8, log_dir=log_dir),
+        DepthMapImageCallback(val_ds, args.train_bsize, 32, log_dir=log_dir),
         keras.callbacks.TensorBoard(
             log_dir=log_dir,
             histogram_freq=5,
