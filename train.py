@@ -20,7 +20,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='AnyNet with Flyingthings3d')
     parser.add_argument('--seed', type=int, default=12345, help='Random seed (training dataset shuffle)')
     parser.add_argument('--global_max_disp', type=int, default=192, help='Global maximum disparity (pixels)')
-    parser.add_argument('--local_max_disps', type=int, nargs='+', default=[12,3,3], help='Maximum disparity localized per Disparity Net stage')
+    parser.add_argument('--local_max_disps', type=int, nargs='+', default=[12,6,3], help='Maximum disparity localized per Disparity Net stage')
     parser.add_argument('--loss_weights', type=float, nargs='+', default=[0.25, 0.5, 1., 1.])
     parser.add_argument('--datapath', default='dataset/',
                         help='datapath')
