@@ -26,11 +26,7 @@ def plot_to_image(img_data, per_image_standardization=False):
     # Convert PNG buffer to TF image
     image = tf.image.decode_png(buf.getvalue(), channels=3)
     plt.close()
-    #import pdb; pdb.set_trace()
-    # Add the batch dimension
-    #image = tf.expand_dims(image, 0)
     return image
-
 
 class DepthMapImageCallback(keras.callbacks.Callback):
     def __init__(self, eval_data, batch_size, max_outputs, log_dir='.logs/', frequency=1):
@@ -58,8 +54,6 @@ class DepthMapImageCallback(keras.callbacks.Callback):
         
         if self.eval_data and epoch % self.frequency == 0:
             samples = tuple(eval_data.as_numpy_iterator())
-            #imgs = self.eval_data.map(lambda x,y: x)
-            #import pdb; pdb.set_trace()
             preds = self.model.predict(self.eval_data)
             values = preds.values()
             with self.writer.as_default():

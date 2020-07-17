@@ -1,17 +1,21 @@
 
 import argparse
 from datetime import datetime
+import json
+import logging
 import os
 
 import tensorflow as tf
 import tensorflow.keras as keras
 
 from tf_anynet.models.callbacks import DepthMapImageCallback
-from tf_anynet.models.anynet_fn import AnyNet
+from tf_anynet.models.anynet_fn import AnyNet, AnyNetV2, AnyNetFactory
 from tf_anynet.models.metrics import (
     L1DisparityMaskLoss,
 )
 from tf_anynet.dataset import TFRecordsDataset, random_crop, center_crop, to_x_y
+
+logger = logging.getLogger(__name__)
 
 
 SAMPLES=2200
@@ -20,19 +24,19 @@ def parse_args():
     parser = argparse.ArgumentParser(description='AnyNet with Flyingthings3d')
     parser.add_argument('--seed', type=int, default=12345, help='Random seed (training dataset shuffle)')
     parser.add_argument('--global_max_disp', type=int, default=192, help='Global maximum disparity (pixels)')
-    parser.add_argument('--local_max_disps', type=int, nargs='+', default=[12,3,3], help='Maximum disparity localized per Disparity Net stage')
+    parser.add_argument('--local_max_disps', type=int, nargs='+', default=[12,6,3], help='Maximum disparity localized per Disparity Net stage')
     parser.add_argument('--loss_weights', type=float, nargs='+', default=[0.25, 0.5, 1., 1.])
     parser.add_argument('--datapath', default='dataset/',
                         help='datapath')
     parser.add_argument('--epochs', type=int, default=1000,
                         help='number of epochs to train')
-    parser.add_argument('--train_bsize', type=int, default=256,
+    parser.add_argument('--train_bsize', type=int, default=220,
                         help='batch size for training')
     parser.add_argument('--resume', type=str, default=None,
                         help='resume path')
     parser.add_argument('--checkpoint', type=str, default=None,
                         help='resume path')                        
-    parser.add_argument('--learning_rate', type=float, default=1e-3,
+    parser.add_argument('--learning_rate', type=float, default=5e-4,
                         help='learning rate')
     parser.add_argument('--with_spn', action='store_true', help='with spn network or not')
     parser.add_argument('--unet_conv2d_filters', type=int, default=1, help='Initial num Conv2D output filters of Unet feature extractor')
@@ -47,8 +51,8 @@ def parse_args():
     return parser.parse_args()
 
 def main():
-    physical_devices = tf.config.list_physical_devices('GPU')
-    tf.config.experimental.set_memory_growth(physical_devices[0], True)
+    # physical_devices = tf.config.list_physical_devices('GPU')
+    # tf.config.experimental.set_memory_growth(physical_devices[0], True)
     
     args = parse_args()
     stages = 3 + args.with_spn
@@ -81,22 +85,52 @@ def main():
 
     val_ds = test_ds.take(1)
     
-    model_builder = AnyNet(
-        batch_size=args.train_bsize, 
-        unet_conv2d_filters=args.unet_conv2d_filters,
-        unet_nblocks=args.unet_nblocks,
-        cspn_conv3d_filters=args.cspn_conv3d_filters,
-        local_max_disps=args.local_max_disps,
-        global_max_disp=args.global_max_disp,
-        loss_weights=args.loss_weights,
-        stages=stages,
-    )
-    
     input_shape = train_ds.element_spec[0][0].shape
-    model = model_builder.build(input_shape=input_shape)
+    if args.checkpoint:
+        model = keras.models.load_model(args.checkpoint)
 
-    optimizer = keras.optimizers.Adam(learning_rate=args.learning_rate)
-    
+        for stage in range(stages):
+            layer = model.get_layer(name=f'disparity_network_stage{stage}')
+            #import pdb; pdb.set_trace()
+            layer.batch_size = args.train_bsize
+            layer.cost_volume.batch_size = args.train_bsize
+    else:
+        anynet = AnyNetFactory(
+                unet_conv2d_filters=args.unet_conv2d_filters,
+                unet_nblocks=args.unet_nblocks,
+                cspn_conv3d_filters=args.cspn_conv3d_filters,
+                local_max_disps=args.local_max_disps,
+                global_max_disp=args.global_max_disp,
+                stages=stages,
+        )
+        model = anynet.build([input_shape, input_shape])
+        optimizer = keras.optimizers.Adam(learning_rate=args.learning_rate)
+        rmse0 = keras.metrics.RootMeanSquaredError(name="rmse_0")
+        rmse1 = keras.metrics.RootMeanSquaredError(name="rmse_1")
+        rmse2 = keras.metrics.RootMeanSquaredError(name="rmse_2")
+        rmse_agg = keras.metrics.RootMeanSquaredError(name="rmse_agg")
+
+        metrics = {
+            'disparity-0': [rmse0, rmse_agg],
+            'disparity-1': [rmse1, rmse_agg],
+            'disparity-2': [rmse2, rmse_agg],
+        }
+
+        model.compile(
+            optimizer=optimizer,
+            loss={
+                f'disparity-{i}': L1DisparityMaskLoss(
+                    i,
+                    args.global_max_disp
+                    )
+                for i in range(0, stages)
+            },
+            loss_weights={
+                f'disparity-{i}': args.loss_weights[i]
+                for i in range(0, stages)
+            },
+            metrics=metrics
+        )
     if args.resume:
         log_dir = f'{args.resume}'
 
@@ -104,37 +138,6 @@ def main():
         log_dir = str(datetime.now()).replace(' ', 'T')
         log_dir = f'./logs/{log_dir}'
 
-    
-    # metrics = [
-    #     keras.metrics.RootMeanSquaredError(name="rmse"),
-    # ]
-
-    rmse0 = keras.metrics.RootMeanSquaredError(name="rmse_0")
-    rmse1 = keras.metrics.RootMeanSquaredError(name="rmse_1")
-    rmse2 = keras.metrics.RootMeanSquaredError(name="rmse_2")
-    rmse_agg = keras.metrics.RootMeanSquaredError(name="rmse_agg")
-
-    metrics = {
-        'disparity-0': [rmse0, rmse_agg],
-        'disparity-1': [rmse1, rmse_agg],
-        'disparity-2': [rmse2, rmse_agg],
-    }
-
-    model.compile(
-        optimizer=optimizer,
-        loss={
-            f'disparity-{i}': L1DisparityMaskLoss(
-                i,
-                args.global_max_disp
-                )
-            for i in range(0, stages)
-        },
-        loss_weights={
-            f'disparity-{i}': args.loss_weights[i]
-            for i in range(0, stages)
-        },
-        metrics=metrics
-    )
 
     callbacks = [
         DepthMapImageCallback(val_ds, args.train_bsize, 32, log_dir=log_dir),
@@ -152,13 +155,10 @@ def main():
         )
     ]
 
-    if args.checkpoint:
-        model.load_weights(args.checkpoint)
-
     model.fit(
         train_ds,
         epochs=args.epochs, 
-        batch_size=args.train_bsize,
+        batch_size=None,
         validation_data=test_ds,
         callbacks=callbacks
     )
