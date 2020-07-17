@@ -9,7 +9,7 @@ import tensorflow as tf
 import tensorflow.keras as keras
 
 from tf_anynet.models.callbacks import DepthMapImageCallback
-from tf_anynet.models.anynet_fn import AnyNet, AnyNetV2, AnyNetFactory
+from tf_anynet.models.anynet import AnyNetV2, AnyNetFactory
 from tf_anynet.models.metrics import (
     L1DisparityMaskLoss,
 )
