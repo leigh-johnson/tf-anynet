@@ -31,7 +31,7 @@ def plot_to_image(img_data, per_image_standardization=False):
     #image = tf.expand_dims(image, 0)
     return image
 
-
+#@keras.utils.register_keras_serializable(package='AnyNet')
 class DepthMapImageCallback(keras.callbacks.Callback):
     def __init__(self, eval_data, batch_size, max_outputs, log_dir='.logs/', frequency=1):
         super(DepthMapImageCallback, self).__init__()

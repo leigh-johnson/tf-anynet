@@ -16,6 +16,8 @@ class DisparityNetwork(keras.layers.Layer):
         global_max_disp=192,
         stages=3,
         batch_size=8,
+        height=None,
+        width=None,
         *args, **kwargs
         ):
         super(DisparityNetwork, self).__init__()
@@ -27,8 +29,8 @@ class DisparityNetwork(keras.layers.Layer):
         self.global_max_disp = global_max_disp
         self.stages = stages
         self.batch_size = batch_size
-        self.width = None
-        self.height = None
+        self.width = width
+        self.height = height
         self.cost2d = None
 
         self.volume_postprocess = []
@@ -49,7 +51,8 @@ class DisparityNetwork(keras.layers.Layer):
             'local_max_disps': self.local_max_disps,
             'global_max_disp': self.global_max_disp,
             'stages': self.stages,
-            'batch_size': self.batch_size
+            'width': self.width,
+            'height': self.height
         }
         config.update(super().get_config())
         return config
@@ -57,13 +60,13 @@ class DisparityNetwork(keras.layers.Layer):
     def warp(self, x, disp):
         return dense_image_warp(x, disp)
 
-    
     def _build_volume_2d(self, feat_l, feat_r, maxdisp, stride=1):
         assert maxdisp % stride == 0  # Assume maxdisp is multiple of stride
-
+        
         if self.cost2d is None:
             cost = tf.Variable(
-                lambda : tf.zeros((self.batch_size, feat_l.shape[1], feat_l.shape[2], maxdisp//stride))
+                lambda : tf.zeros((self.batch_size, feat_l.shape[1], feat_l.shape[2], maxdisp//stride)),
+                trainable=False
             )
             self.cost2d = cost
         else:
@@ -134,7 +137,7 @@ class DisparityNetwork(keras.layers.Layer):
         batch_feat_r = tf.reshape(batch_feat_r,
             (-1, size[1], size[2], size[3])
         )
-
+        
         batch_r_warped = self.warp(batch_feat_r, batch_disp)
         batch_l_diff = batch_feat_l - batch_r_warped
 
@@ -145,7 +148,7 @@ class DisparityNetwork(keras.layers.Layer):
         return cost
 
     def call(self, inputs):
-
+        #import pdb; pdb.set_trace()
         feats_l, feats_r = inputs
         
         pred = []
@@ -155,7 +158,6 @@ class DisparityNetwork(keras.layers.Layer):
                     pred[scale-1], 
                     (feats_l[scale].shape[1], feats_l[scale].shape[2]
                 )) * feats_l[scale].shape[1] / self.height
-
 
                 cost = self._build_volume_2d3(
                     feats_l[scale], feats_r[scale],
@@ -188,12 +190,13 @@ class DisparityNetwork(keras.layers.Layer):
                 disp_up = tf.image.resize(pred_low_res, [self.height, self.width])
                 pred.append(disp_up)
 
-        pred = [self.bnorms[i](x) for i,x in enumerate(pred)]
-        return pred
+        preds = [self.bnorms[i](x) for i,x in enumerate(pred)]
+        return preds
+        
 
 @keras.utils.register_keras_serializable(package='AnyNet')
 class DisparityRegression(keras.layers.Layer):
-    def __init__(self, start, end, stride=1):
+    def __init__(self, start, end, stride=1, *args, **kwargs):
         super(DisparityRegression, self).__init__()
         self.start = start
 

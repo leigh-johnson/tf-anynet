@@ -60,16 +60,6 @@ class AnyNet(object):
             batch_size=batch_size
         )
 
-        self.disparity_network = DisparityNetwork(
-            disp_conv3d_filters=disp_conv3d_filters,
-            disp_conv3d_layers=disp_conv3d_layers,
-            disp_conv3d_growth_rate= disp_conv3d_growth_rate,
-            local_max_disps=local_max_disps,
-            global_max_disp=global_max_disp,
-            stages=stages,
-            batch_size=batch_size
-        )
-
         # if with_cspn:
         #     self.cspnet = ConvSpatialPropagationNet(
         #         cspn_conv2d_filters,
@@ -87,8 +77,19 @@ class AnyNet(object):
         feats_l = self.feature_extractor(left_img)
         feats_r = self.feature_extractor(right_img)
 
-        self.disparity_network.height = height
-        self.disparity_network.width = width
+        self.disparity_network = DisparityNetwork(
+            disp_conv3d_filters=self.disp_conv3d_filters,
+            disp_conv3d_layers=self.disp_conv3d_layers,
+            disp_conv3d_growth_rate= self.disp_conv3d_growth_rate,
+            local_max_disps=self.local_max_disps,
+            global_max_disp=self.global_max_disp,
+            stages=self.stages,
+            batch_size=self.batch_size,
+            height=height,
+            width=width
+        )
+        # self.disparity_network.height = height
+        # self.disparity_network.width = width
         output = self.disparity_network([feats_l, feats_r ])
         return keras.Model([left_img, right_img], {
             f'disparity-{i}': x for i,x in enumerate(output)
