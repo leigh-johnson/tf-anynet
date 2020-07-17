@@ -203,10 +203,12 @@ class DisparityNetworkStage0(keras.layers.Layer):
         cost = tf.expand_dims(cost, -1)
         cost = self.regularizer(cost)
         cost = tf.squeeze(cost, axis=-1)
+        
         softmax = keras.layers.Softmax(axis=-1, name=f'softmax{self.stage}')(-cost)
         pred_low_res = DisparityRegression(
             0, self.local_max_disp
         )(softmax)
+        pred_low_res = pred_low_res * self.height * self.width
         output = tf.image.resize(pred_low_res, [self.height, self.width])
         return output
     # def call(self, inputs):
@@ -279,6 +281,7 @@ class DisparityNetworkStageN(keras.layers.Layer):
         start = -self.local_max_disp+1
         end = self.local_max_disp
         pred_low_res = DisparityRegression(start, end)(softmax)
+        pred_low_res = pred_low_res * self.height * self.width
         resized = tf.image.resize(pred_low_res, [ self.height, self.width ])
         return resized + residuals
     
@@ -316,11 +319,6 @@ class DisparityRegression(keras.layers.Layer):
 
     def call(self, x):
         x = x * self.disp
-        self.disp = tf.reshape(
-            range(self.start*self.stride, self.end*self.stride, self.stride),
-            (1, 1, 1, -1)
-        )
-
         return keras.backend.sum(
             x, axis=-1, keepdims=True
         )
