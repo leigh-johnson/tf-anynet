@@ -315,7 +315,7 @@ class DisparityNetworkStageN(keras.layers.Layer):
         feats_l, feats_r = feats
 
         self.cost_volume.batch_size = self.batch_size
-
+        
         wflow = tf.image.resize(residuals, (feats_l.shape[1], feats_l.shape[2]))
         wflow = wflow * feats_l.shape[1] / self.height
 
@@ -363,7 +363,7 @@ class DisparityRegression(keras.layers.Layer):
         #     multiples=multiples,
         # )
 
-        # self.disp = tf.cast(self.disp, tf.float32)
+        self.disp = tf.cast(self.disp, tf.float32)
         
 
     def call(self, inputs):
@@ -372,6 +372,12 @@ class DisparityRegression(keras.layers.Layer):
         disp = tf.vectorized_map(
             lambda x: x * self.disp, inputs
         )
+        disp = tf.reshape(disp, (
+            -1,
+            disp.shape[-3],
+            disp.shape[-2],
+            disp.shape[-1] * disp.shape[1]
+        ))
         return keras.backend.sum(
             disp, axis=-1, keepdims=True
         )
