@@ -258,7 +258,7 @@ class DisparityNetworkStage0(keras.layers.Layer):
         pred_low_res = DisparityRegression(
             0, self.local_max_disp
         )(softmax)
-        pred_low_res = pred_low_res * self.height * self.width
+        pred_low_res = pred_low_res * self.height / pred_low_res[1]
         output = tf.image.resize(pred_low_res, [self.height, self.width])
         return output
 
@@ -330,7 +330,7 @@ class DisparityNetworkStageN(keras.layers.Layer):
         start = -self.local_max_disp+1
         end = self.local_max_disp
         pred_low_res = DisparityRegression(start, end)(softmax)
-        pred_low_res = pred_low_res * self.height * self.width
+        pred_low_res = pred_low_res * self.height / pred_low_res.shape[1]
         resized = tf.image.resize(pred_low_res, [ self.height, self.width ])
         return resized + residuals
     
