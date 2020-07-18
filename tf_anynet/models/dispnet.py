@@ -5,6 +5,58 @@ from tensorflow_addons.image import dense_image_warp
 from .regularization import Conv3DRegularizer
 
 
+@keras.utils.register_keras_serializable(package='AnyNet')
+class CostVolume2DV2(keras.layers.Layer):
+    def __init__(self, local_max_disp, stride=1):
+        assert local_max_disp % stride == 0
+        super(CostVolume2DV2, self).__init__()
+        self.local_max_disp = local_max_disp
+        self.stride = stride
+        self.height = None
+        self.width = None
+
+    def get_config(self):
+        config = {
+            'stride': self.stride,
+            'local_max_disp': self.local_max_disp,
+            'height': self.height,
+            'width': self.width
+        }
+        config.update(super().get_config())
+        return config
+    def build(self, input_shape):
+        input_l, _= input_shape
+        _, height, width, _ = input_l
+        self.height = height
+        self.width = width
+
+    def call(self, inputs):
+        feat_l, feat_r = inputs
+
+        cost = []
+        for k in range(0, self.local_max_disp, self.stride):
+
+            if k > 0:
+                k_init = tf.abs(feat_l[:, :, :k, :])
+                k_dim = tf.abs(feat_l[:, :, k:, :] - feat_r[:, :, :-k, :])
+                k_dim = tf.concat([k_init, k_dim], -2)
+                norm = tf.linalg.norm(
+                    k_dim, 
+                    ord=1, 
+                    axis=-1,
+                )
+                cost.append(norm)
+            else:
+                # no k slice initializer needed in the top-left corner
+                k_dim = tf.abs(feat_l[:, :, :, :] - feat_r[:, :, :, :])
+                norm = tf.linalg.norm(
+                    k_dim, 
+                    ord=1, 
+                    axis=-1,
+                )
+                cost.append(norm)
+
+        return tf.stack(cost, axis=-1)
 
 @keras.utils.register_keras_serializable(package='AnyNet')
 class CostVolume2D(keras.layers.Layer):
@@ -168,7 +220,7 @@ class DisparityNetworkStage0(keras.layers.Layer):
         self.width = width
         self.stride = stride
         self.batch_size = batch_size
-        self.cost_volume = CostVolume2D(self.local_max_disp, stride=self.stride)
+        self.cost_volume = CostVolume2DV2(self.local_max_disp, stride=self.stride)
 
         self.regularizer = Conv3DRegularizer(
             self.disp_conv3d_layers,
@@ -194,10 +246,12 @@ class DisparityNetworkStage0(keras.layers.Layer):
 
         feat_l, feat_r = inputs
 
-        self.cost_volume.batch_size = self.batch_size
         cost = self.cost_volume([feat_l, feat_r])
+
+        # expand dimensions to preserve "context" in 3D convolution
         cost = tf.expand_dims(cost, -1)
         cost = self.regularizer(cost)
+
         cost = tf.squeeze(cost, axis=-1)
         
         softmax = keras.layers.Softmax(axis=-1, name=f'softmax{self.stage}')(-cost)

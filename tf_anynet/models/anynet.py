@@ -126,7 +126,7 @@ class AnyNetV2(keras.layers.Layer):
                 outputs.append(disparity_stage)
 
         self.outputs = outputs
-        self.outputs = [keras.layers.BatchNormalization()(x) for x in self.outputs]
+        #self.outputs = [keras.layers.BatchNormalization()(x) for x in self.outputs]
         self.model = keras.Model([left_img, right_img], {
             f'disparity-{i}': x for i,x in enumerate(outputs)
         }, name="anynet")

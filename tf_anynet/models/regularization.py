@@ -22,6 +22,7 @@ class Conv3DRegularizer(keras.layers.Layer):
 
     def build(self, input_shapes):
         inputs = layers.Input(shape=input_shapes[1:], name="input_conv3d_regularizer")
+        
         self.conv3d_net = self._build_conv3d_net(inputs, self.nlayers, self.out_channels)
         self.model = keras.Model(inputs=inputs, outputs=self.conv3d_net)
 
@@ -50,29 +51,29 @@ class Conv3DRegularizer(keras.layers.Layer):
         strides=1
         ):
         
-        #if batch_norm is True:
-        x = layers.BatchNormalization(
-                momentum=momentum,
-                epsilon=epsilon,
-        )(inputs)
-        x = layers.Conv3D(
-            out_channels,
-            kernel_size=kernel_size,
-            strides=strides,
-            padding=padding,
-            use_bias=False,
-            activation='relu',
-            dilation_rate=dilation_rate,
-            kernel_initializer=initializer_cls()
-        )(x)
-        return x
-        # else:
-        #     return layers.Conv2D(
-        #         out_channels,
-        #         kernel_size=kernel_size,
-        #         strides=strides,
-        #         padding=padding,
-        #         activation='relu',
-        #         dilation_rate=dilation_rate,
-        #         kernel_initializer=initializer_cls()
-        #     )(inputs)
+        if batch_norm is True:
+            x = layers.BatchNormalization(
+                    momentum=momentum,
+                    epsilon=epsilon,
+            )(inputs)
+            x = layers.Conv3D(
+                out_channels,
+                kernel_size=kernel_size,
+                strides=strides,
+                padding=padding,
+                use_bias=False,
+                activation='relu',
+                dilation_rate=dilation_rate,
+                kernel_initializer=initializer_cls()
+            )(x)
+            return x
+        else:
+            return layers.Conv3D(
+                out_channels,
+                kernel_size=kernel_size,
+                strides=strides,
+                padding=padding,
+                activation='relu',
+                dilation_rate=dilation_rate,
+                kernel_initializer=initializer_cls()
+            )(inputs)
