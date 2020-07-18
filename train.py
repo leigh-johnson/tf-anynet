@@ -30,7 +30,7 @@ def parse_args():
                         help='datapath')
     parser.add_argument('--epochs', type=int, default=1000,
                         help='number of epochs to train')
-    parser.add_argument('--train_bsize', type=int, default=256,
+    parser.add_argument('--train_bsize', type=int, default=224,
                         help='batch size for training')
     parser.add_argument('--resume', type=str, default=None,
                         help='resume path')
@@ -81,7 +81,7 @@ def main():
         .map(random_crop, num_parallel_calls=4)\
         .shuffle(args.train_bsize*8, reshuffle_each_iteration=True)\
         .batch(args.train_bsize,drop_remainder=True)\
-        .prefetch(3)
+        .prefetch(8)
     test_cache_file = args.test_ds.split('.')[0]
     test_ds  = TFRecordsDataset(args.test_ds, training=True)\
         .with_options(data_options)\

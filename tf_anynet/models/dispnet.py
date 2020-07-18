@@ -44,6 +44,7 @@ class CostVolume2DV2(keras.layers.Layer):
                     k_dim, 
                     ord=1, 
                     axis=-1,
+                
                 )
                 cost.append(norm)
             else:
@@ -193,7 +194,6 @@ class CostVolume3D(keras.layers.Layer):
         norm = tf.linalg.norm(batch_l_diff, ord=1, axis=-1, keepdims=True)
 
         cost = tf.reshape(norm, (self.batch_size,height,width, -1))
-
         return cost
 
 @keras.utils.register_keras_serializable(package='AnyNet')
@@ -255,9 +255,11 @@ class DisparityNetworkStage0(keras.layers.Layer):
         cost = tf.squeeze(cost, axis=-1)
         
         softmax = keras.layers.Softmax(axis=-1, name=f'softmax{self.stage}')(-cost)
+        
         pred_low_res = DisparityRegression(
             0, self.local_max_disp
         )(softmax)
+
         pred_low_res = pred_low_res * self.height / pred_low_res[1]
         output = tf.image.resize(pred_low_res, [self.height, self.width])
         return output
@@ -355,29 +357,15 @@ class DisparityRegression(keras.layers.Layer):
     def build(self, input_shape):
         self.disp = tf.reshape(
             range(self.start*self.stride, self.end*self.stride, self.stride),
-            (1, 1, 1, -1)
+            (1, 1, -1)
         )
-        # multiples = tf.constant((input_shape[1],input_shape[2],1))
-        # self.disp = tf.tile(
-        #     self.disp,
-        #     multiples=multiples,
-        # )
-
         self.disp = tf.cast(self.disp, tf.float32)
         
 
     def call(self, inputs):
-        #x = x * self.disp
 
         disp = tf.vectorized_map(
             lambda x: x * self.disp, inputs
         )
-        disp = tf.reshape(disp, (
-            -1,
-            disp.shape[-3],
-            disp.shape[-2],
-            disp.shape[-1] * disp.shape[1]
-        ))
-        return keras.backend.sum(
-            disp, axis=-1, keepdims=True
-        )
+
+        return keras.backend.sum(inputs * disp, axis=-1, keepdims=True)
