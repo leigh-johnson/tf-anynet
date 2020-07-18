@@ -45,10 +45,6 @@ class CostVolume2D(keras.layers.Layer):
     def call(self, inputs):
         feat_l, feat_r = inputs
         
-        #zeroes = tf.zeros((self.batch_size, height, weight, self.local_max_disp//self.stride))
-        #import pdb; pdb.set_trace()
-        # if zeroes.shape != self.cost.shape:
-        #     self.cost.set_shape(zeroes.shape)
 
         cost = self.cost.assign(self.initialize_cost2d())
         
@@ -211,8 +207,7 @@ class DisparityNetworkStage0(keras.layers.Layer):
         pred_low_res = pred_low_res * self.height * self.width
         output = tf.image.resize(pred_low_res, [self.height, self.width])
         return output
-    # def call(self, inputs):
-    #     return self.model(inputs)
+
 
 @keras.utils.register_keras_serializable(package='AnyNet')
 class DisparityNetworkStageN(keras.layers.Layer):

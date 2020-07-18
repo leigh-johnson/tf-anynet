@@ -87,11 +87,17 @@ def main():
     
     input_shape = train_ds.element_spec[0][0].shape
     if args.checkpoint:
+        # cost volume variables loaded with the batch_size used for training
+        # e.g (245, ...shape)
         model = keras.models.load_model(args.checkpoint)
 
         for stage in range(stages):
+            # get each disparity stage + associated cost volume layer
+            # then set new batch size
+            # this will re-initialize the variables with the new shape
+            # these variables are not trainable!
+            # Necessary because TensorFlow can only perform slice value assignments on Variables
             layer = model.get_layer(name=f'disparity_network_stage{stage}')
-            #import pdb; pdb.set_trace()
             layer.batch_size = args.train_bsize
             layer.cost_volume.batch_size = args.train_bsize
     else:
