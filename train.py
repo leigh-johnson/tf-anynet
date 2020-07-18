@@ -30,7 +30,7 @@ def parse_args():
                         help='datapath')
     parser.add_argument('--epochs', type=int, default=1000,
                         help='number of epochs to train')
-    parser.add_argument('--train_bsize', type=int, default=220,
+    parser.add_argument('--train_bsize', type=int, default=256,
                         help='batch size for training')
     parser.add_argument('--resume', type=str, default=None,
                         help='resume path')
@@ -70,14 +70,21 @@ def main():
     
     # test_ds = ds.skip(train_size).batch(args.train_bsize)
     # val_ds = ds.skip(train_size).take(args.train_bsize).batch(args.train_bsize)
+    data_options = tf.data.Options()
+    data_options.experimental_deterministic = False
+    data_options.experimental_optimization.map_parallelization = True
+    data_options.experimental_optimization.parallel_batch = True
+
     train_cache_file = args.train_ds.split('.')[0]
     train_ds = TFRecordsDataset(args.train_ds, training=True)\
+        .with_options(data_options)\
         .map(random_crop, num_parallel_calls=4)\
         .shuffle(args.train_bsize*8, reshuffle_each_iteration=True)\
         .batch(args.train_bsize,drop_remainder=True)\
         .prefetch(3)
     test_cache_file = args.test_ds.split('.')[0]
     test_ds  = TFRecordsDataset(args.test_ds, training=True)\
+        .with_options(data_options)\
         .map(center_crop, num_parallel_calls=4)\
         .batch(args.train_bsize, drop_remainder=True)\
         .prefetch(3)
