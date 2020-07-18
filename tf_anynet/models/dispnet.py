@@ -146,7 +146,7 @@ class CostVolume3D(keras.layers.Layer):
 
     def warp(self, x, disp):
         #import pdb; pdb.set_trace()
-        return dense_image_warp(x, disp)
+        return dense_image_warp(x, -disp)
 
     def call(self, inputs):
         feat_l, feat_r, wflow = inputs
@@ -355,19 +355,23 @@ class DisparityRegression(keras.layers.Layer):
     def build(self, input_shape):
         self.disp = tf.reshape(
             range(self.start*self.stride, self.end*self.stride, self.stride),
-            (1, 1, -1)
+            (1, 1, 1, -1)
         )
-        multiples = tf.constant((input_shape[1],input_shape[2],1))
-        self.disp = tf.tile(
-            self.disp,
-            multiples=multiples,
-        )
+        # multiples = tf.constant((input_shape[1],input_shape[2],1))
+        # self.disp = tf.tile(
+        #     self.disp,
+        #     multiples=multiples,
+        # )
 
-        self.disp = tf.cast(self.disp, tf.float32)
+        # self.disp = tf.cast(self.disp, tf.float32)
         
 
-    def call(self, x):
-        x = x * self.disp
+    def call(self, inputs):
+        #x = x * self.disp
+
+        disp = tf.vectorized_map(
+            lambda x: x * self.disp, inputs
+        )
         return keras.backend.sum(
-            x, axis=-1, keepdims=True
+            disp, axis=-1, keepdims=True
         )
