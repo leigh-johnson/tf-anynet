@@ -1,8 +1,13 @@
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow_addons.image import dense_image_warp
+from tensorflow_addons.image import dense_image_warp, interpolate_bilinear
 
 from .regularization import Conv3DRegularizer
+
+def _get_dim(x, idx):
+    if x.shape.ndims is None:
+        return tf.shape(x)[idx]
+    return x.shape[idx] or tf.shape(x)[idx]
 
 
 @keras.utils.register_keras_serializable(package='AnyNet')
@@ -36,7 +41,14 @@ class CostVolume2DV2(keras.layers.Layer):
         cost = []
         for k in range(0, self.local_max_disp, self.stride):
 
+            # reduced = tf.reduce_sum(
+            #     tf.math.abs(feat_l[:, :, :i, :]),
+            #     axis=-1
+            # )
+            # cost = cost[:, :, :i, i//self.stride].assign(reduced)
             if k > 0:
+                k_init = tf.zeros((1, self.height, self.width, 1))
+
                 k_init = tf.abs(feat_l[:, :, :k, :])
                 k_dim = tf.abs(feat_l[:, :, k:, :] - feat_r[:, :, :-k, :])
                 k_dim = tf.concat([k_init, k_dim], -2)
@@ -145,14 +157,85 @@ class CostVolume3D(keras.layers.Layer):
         config.update(super().get_config())
         return config
 
-    def warp(self, x, disp):
-        #import pdb; pdb.set_trace()
-        return dense_image_warp(x, -disp)
+    def warpV3(self, x, disp):
+        batch_size, height, width, channels = (
+            _get_dim(x, 0),
+            _get_dim(x, 1),
+            _get_dim(x, 2),
+            _get_dim(x, 3),
+        )
 
+        grid_x, grid_y = tf.meshgrid(tf.range(width), tf.range(height))
+        stacked_grid = tf.cast(tf.stack([grid_x, grid_y], axis=2), tf.float32)
+        batched_grid = tf.expand_dims(stacked_grid, axis=0)
+
+        query_points_on_gridL = batched_grid[:,:,:,:1] - disp
+        query_points_on_gridR = batched_grid[:,:,:,1:]
+
+        query_points_on_grid = tf.concat([
+            query_points_on_gridL,
+            query_points_on_gridR
+        ], -1)
+
+        query_points_flattened = tf.reshape(query_points_on_grid, (batch_size, height * width, 2))
+        # Compute values at the query points, then reshape the result back to the
+        # image grid.
+        interpolated = interpolate_bilinear(x, query_points_flattened)
+        interpolated = tf.reshape(interpolated, [batch_size, height, width, channels])
+        return interpolated
+
+        
+    def warpV2(self, x, disp):
+        #import pdb; pdb.set_trace()
+        # https://github.com/tensorflow/addons/blob/v0.10.0/tensorflow_addons/image/dense_image_warp.py#L189-L252
+        batch_size, height, width, channels = (
+            _get_dim(x, 0),
+            _get_dim(x, 1),
+            _get_dim(x, 2),
+            _get_dim(x, 3),
+        )
+
+        grid_x, grid_y = tf.meshgrid(tf.range(width), tf.range(height))
+        
+        
+        
+        batched_grid = tf.tile(batched_grid, multiples=(batch_size,1,1,1))
+
+        query_points_on_gridL = batched_grid[:,:,:,:1] - disp
+        query_points_on_gridR = batched_grid[:,:,:,1:]
+
+        
+        query_points_on_grid = tf.concat([
+            query_points_on_gridL,
+            query_points_on_gridR
+        ], -1)
+
+        query_points_flattened = tf.reshape(query_points_on_grid, (batch_size, height * width, 2))
+        # Compute values at the query points, then reshape the result back to the
+        # image grid.
+        interpolated = interpolate_bilinear(x, query_points_flattened)
+        interpolated = tf.reshape(interpolated, [batch_size, height, width, channels])
+        return interpolated
+        #xx = tf.range(0, )
+        #.view(1, -1).repeat(H, 1)
+        #return dense_image_warp(x, flow)
+    def warp(self, x, disp):
+        return dense_image_warp(x, disp)
     def call(self, inputs):
         feat_l, feat_r, wflow = inputs
 
         _, height, width, channels = feat_r.shape
+
+        #for (feat_l, feat_r, wflow) in inputs:
+        # warped_r = self.warp(feat_r, wflow)
+
+        # l_diff = feat_l - warped_r
+
+        # norm = tf.linalg.norm(l_diff, ord=1, axis=-1, keepdims=True)
+
+        # cost = tf.reshape(norm, (-1,height,width, 1))
+        # import pdb; pdb.set_trace()
+        # return cost
 
         batch_disp = tf.tile(
             wflow[:,:,:,:,None],
@@ -165,6 +248,8 @@ class CostVolume3D(keras.layers.Layer):
             range(-self.local_max_disp+1, self.local_max_disp),
             multiples=(self.batch_size,)
         )[:,None,None,None] * self.stride
+
+        # import pdb; pdb.set_trace()
 
         batch_shift = tf.cast(batch_shift, tf.float32)
 
@@ -184,11 +269,15 @@ class CostVolume3D(keras.layers.Layer):
             feat_r[:,:,:,:, None],
             multiples=(1, 1, 1, 1, self.local_max_disp*2-1)
         )
+
+
         batch_feat_r = tf.reshape(batch_feat_r,
             (-1, height, width, channels)
         )
+
         
         batch_r_warped = self.warp(batch_feat_r, batch_disp)
+
         batch_l_diff = batch_feat_l - batch_r_warped
 
         norm = tf.linalg.norm(batch_l_diff, ord=1, axis=-1, keepdims=True)
@@ -220,7 +309,7 @@ class DisparityNetworkStage0(keras.layers.Layer):
         self.width = width
         self.stride = stride
         self.batch_size = batch_size
-        self.cost_volume = CostVolume2DV2(self.local_max_disp, stride=self.stride)
+        self.cost_volume = CostVolume2D(self.local_max_disp, stride=self.stride)
 
         self.regularizer = Conv3DRegularizer(
             self.disp_conv3d_layers,
@@ -245,6 +334,8 @@ class DisparityNetworkStage0(keras.layers.Layer):
     def call(self, inputs):
 
         feat_l, feat_r = inputs
+
+        self.cost_volume.batch_size = self.batch_size
 
         cost = self.cost_volume([feat_l, feat_r])
 
@@ -339,6 +430,47 @@ class DisparityNetworkStageN(keras.layers.Layer):
  
 @keras.utils.register_keras_serializable(package='AnyNet')
 class DisparityRegression(keras.layers.Layer):
+    def __init__(self, start, end, stride=1):
+        super(DisparityRegression, self).__init__()
+        self.start = start
+
+        self.end = end
+        self.stride = stride
+
+
+    def get_config(self):
+        config = {
+            'start': self.start,
+            'end': self.end,
+            'batch_size': self.batch_size
+        }
+        config.update(super().get_config)
+        return config
+
+    def build(self, input_shape):
+        self.disp = tf.reshape(
+            range(self.start*self.stride, self.end*self.stride, self.stride),
+            (1, 1, 1, -1)
+        )
+
+        
+
+    def call(self, x):
+        input_shape = x.shape
+        batch_size = 1 if input_shape[0] is None else input_shape[0]
+        multiples = tf.constant((batch_size, input_shape[1],input_shape[2],1))
+        self.disp = tf.tile(
+            self.disp,
+            multiples=multiples
+        )
+
+        self.disp = tf.cast(self.disp, tf.float32)
+        x = x * self.disp
+        return keras.backend.sum(
+            x, axis=-1, keepdims=True
+        )
+@keras.utils.register_keras_serializable(package='AnyNet')
+class DisparityRegressionV2(keras.layers.Layer):
     def __init__(self, start, end, stride=1, *args, **kwargs):
         super(DisparityRegression, self).__init__()
         self.start = start

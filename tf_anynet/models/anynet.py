@@ -78,7 +78,7 @@ class AnyNetV2(keras.layers.Layer):
         
         left_img = keras.Input(shape=input_shape[0][1:], name="anynet_left_img")
         right_img = keras.Input(shape=input_shape[1][1:], name="anynet_right_img")
-
+        
         _, height, width, _ = input_shape[0]
 
         self.feature_extractor  = FeatureExtractor(
@@ -126,14 +126,17 @@ class AnyNetV2(keras.layers.Layer):
                 outputs.append(disparity_stage)
 
         self.outputs = outputs
-        #self.outputs = [keras.layers.BatchNormalization()(x) for x in self.outputs]
         self.model = keras.Model([left_img, right_img], {
             f'disparity-{i}': x for i,x in enumerate(outputs)
         }, name="anynet")
         return self.model
     
     def call(self, inputs):
-        return self.model(inputs)
+        left_img, right_img = inputs
+        left_img = tf.image.per_image_standardization(left_img)
+        right_img = tf.image.per_image_standardization(right_img)
+
+        return self.model([left_img, right_img])
 
 class AnyNetFactory(object):
 

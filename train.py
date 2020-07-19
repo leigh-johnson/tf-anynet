@@ -20,17 +20,27 @@ logger = logging.getLogger(__name__)
 
 SAMPLES=2200
 
+### Driving norms
+# Fit normalizer to x1 (left)
+# mean: <tf.Variable 'mean:0' shape=(3,) dtype=float32, numpy=array([0.4202709 , 0.39973992, 0.36441025], dtype=float32)> 
+# var: <tf.Variable 'variance:0' shape=(3,) dtype=float32, numpy=array([0.03899407, 0.03312538, 0.02767374], dtype=float32)> 
+# count: <tf.Variable 'count:0' shape=() dtype=int64, numpy=11606976000>
+# Fit normalizer to x2
+# mean: <tf.Variable 'mean:0' shape=(3,) dtype=float32, numpy=array([0.42073512, 0.4001276 , 0.36470583], dtype=float32)> 
+# var: <tf.Variable 'variance:0' shape=(3,) dtype=float32, numpy=array([0.03896059, 0.033059  , 0.02757403], dtype=float32)> 
+# count: <tf.Variable 'count:0' shape=() dtype=int64, numpy=11606976000>
+
 def parse_args():
     parser = argparse.ArgumentParser(description='AnyNet with Flyingthings3d')
     parser.add_argument('--seed', type=int, default=12345, help='Random seed (training dataset shuffle)')
     parser.add_argument('--global_max_disp', type=int, default=192, help='Global maximum disparity (pixels)')
-    parser.add_argument('--local_max_disps', type=int, nargs='+', default=[12,6,3], help='Maximum disparity localized per Disparity Net stage')
+    parser.add_argument('--local_max_disps', type=int, nargs='+', default=[24,12,6], help='Maximum disparity localized per Disparity Net stage')
     parser.add_argument('--loss_weights', type=float, nargs='+', default=[0.25, 0.5, 1., 1.])
     parser.add_argument('--datapath', default='dataset/',
                         help='datapath')
     parser.add_argument('--epochs', type=int, default=1000,
                         help='number of epochs to train')
-    parser.add_argument('--train_bsize', type=int, default=224,
+    parser.add_argument('--train_bsize', type=int, default=128,
                         help='batch size for training')
     parser.add_argument('--resume', type=str, default=None,
                         help='resume path')
@@ -71,32 +81,30 @@ def main():
     # test_ds = ds.skip(train_size).batch(args.train_bsize)
     # val_ds = ds.skip(train_size).take(args.train_bsize).batch(args.train_bsize)
     data_options = tf.data.Options()
-    data_options.experimental_deterministic = False
+    data_options.experimental_deterministic = True
     data_options.experimental_optimization.map_parallelization = True
     data_options.experimental_optimization.parallel_batch = True
-
-    train_cache_file = args.train_ds.split('.')[0]
-    train_ds = TFRecordsDataset(args.train_ds, training=True)\
+    
+    train_ds = TFRecordsDataset(args.train_ds)\
         .with_options(data_options)\
         .map(random_crop, num_parallel_calls=4)\
         .shuffle(args.train_bsize*8, reshuffle_each_iteration=True)\
         .batch(args.train_bsize,drop_remainder=True)\
         .prefetch(8)
-    test_cache_file = args.test_ds.split('.')[0]
-    test_ds  = TFRecordsDataset(args.test_ds, training=True)\
+
+    test_ds  = TFRecordsDataset(args.test_ds)\
         .with_options(data_options)\
         .map(center_crop, num_parallel_calls=4)\
         .batch(args.train_bsize, drop_remainder=True)\
         .prefetch(3)
-    
-
+        
     val_ds = test_ds.take(1)
     
     input_shape = train_ds.element_spec[0][0].shape
     if args.checkpoint:
         # cost volume variables loaded with the batch_size used for training
         # e.g (245, ...shape)
-        model = keras.models.load_model(args.checkpoint)
+        model = keras.models.load_weights(args.checkpoint)
 
         for stage in range(stages):
             # get each disparity stage + associated cost volume layer

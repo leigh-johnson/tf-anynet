@@ -11,6 +11,48 @@ CROP_W = 512
 FULL_W = 960
 FULL_H = 540
 
+def to_normalized_x_y(ds):
+    print('Loading x1')
+    x1 = ds.map(to_x1, deterministic=True, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    print('Loading x2')
+    x2 = ds.map(to_x2, deterministic=True, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    print('Loading y')
+    y = ds.map(to_y, deterministic=True, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    normalizer = tf.keras.layers.experimental.preprocessing.Normalization(
+        axis=-1
+    )
+    normalizer.adapt(x1)
+    print('Fit normalizer to x1')
+    print(f'mean: {normalizer.mean} var: {normalizer.variance} count: {normalizer.count}')
+    normalizer.adapt(x2)
+    print('Fit normalizer to x2')
+    print(f'mean: {normalizer.mean} var: {normalizer.variance} count: {normalizer.count}')
+    x1 = normalizer(x1)
+    x2 = normalizer(x2)
+    return ((x1, x2), y)
+    
+def to_y(example_proto):
+    tfrecord = tf.io.parse_single_example(example_proto, FEATURE_DESCRIPTION)
+    disp_img = tf.reshape(
+        tf.io.decode_raw(tfrecord['disp_raw'], tf.float32),
+        [FULL_H, FULL_W, 1]
+    )
+    return disp_img
+
+def to_x1(example_proto):
+    tfrecord = tf.io.parse_single_example(example_proto, FEATURE_DESCRIPTION)
+
+    left_img = tf.io.decode_raw(tfrecord['left_img_raw'], tf.float32)
+    left_img = tf.reshape(left_img, [FULL_H, FULL_W, 3])
+
+    return left_img
+
+def to_x2(example_proto):
+    tfrecord = tf.io.parse_single_example(example_proto, FEATURE_DESCRIPTION)
+    right_img = tf.io.decode_raw(tfrecord['right_img_raw'], tf.float32)
+    right_img = tf.reshape(right_img, [FULL_H, FULL_W, 3])
+    return right_img
+
 def to_x_y(example_proto):
     tfrecord = tf.io.parse_single_example(example_proto, FEATURE_DESCRIPTION)
 
@@ -163,8 +205,7 @@ class TFRecordsDataset(tf.data.Dataset):
     DATA_ROOT =  'data/'
 
 
-    def __new__(self, pattern, training=False):
-        self.training = training
+    def __new__(self, pattern, calc_normalize=False):
         data_root = pathlib.Path(self.DATA_ROOT)
 
         files = tf.data.Dataset.list_files(
@@ -173,5 +214,9 @@ class TFRecordsDataset(tf.data.Dataset):
             )
         
         ds = tf.data.TFRecordDataset(files, compression_type='GZIP', num_parallel_reads=24)
-        return ds\
-            .map(to_x_y, num_parallel_calls=8)
+        
+        if calc_normalize:
+            return ds.apply(to_normalized_x_y)
+        else:
+            return ds\
+            .map(to_x_y, num_parallel_calls=4)
