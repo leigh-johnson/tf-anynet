@@ -10,16 +10,12 @@ def conv3d_block(
     kernel_size=3,     
     dilation_rate=1, 
     batch_norm=True,
-    momentum=0.9,
-    epsilon=1e-5,
+    momentum=0.99,
+    epsilon=1e-3,
     strides=1
     ):
     
     if batch_norm:
-        x = layers.BatchNormalization(
-                momentum=momentum,
-                epsilon=epsilon,
-        )(inputs)
         x = layers.Conv3D(
             out_channels,
             kernel_size=kernel_size,
@@ -29,6 +25,10 @@ def conv3d_block(
             activation='relu',
             dilation_rate=dilation_rate,
             kernel_initializer=initializer_cls()
+        )(inputs)
+        x = layers.BatchNormalization(
+                momentum=momentum,
+                epsilon=epsilon,
         )(x)
         return x
     else:
@@ -71,6 +71,7 @@ class Conv3DRegularizer(keras.layers.Layer):
     def build(self, input_shapes):
 
         inputs = layers.Input(shape=input_shapes[1:], name="input_conv3d_regularizer")
+
         self.conv3d_net = conv3d_net(inputs, self.nlayers, self.out_channels)
         self.model = keras.Model(inputs, self.conv3d_net)
 

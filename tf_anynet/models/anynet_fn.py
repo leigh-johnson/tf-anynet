@@ -82,6 +82,7 @@ class AnyNet(object):
         left_img = keras.Input(shape=input_shape[1:], name="input_left_img")
         right_img = keras.Input(shape=input_shape[1:], name="input_right_img")
 
+
         _, height, width, _ = input_shape
         
         feats_l = self.feature_extractor(left_img)

@@ -55,8 +55,37 @@ class DisparityNetwork(keras.layers.Layer):
         return config
 
     def warp(self, x, disp):
-        return dense_image_warp(x, disp)
+        return dense_image_warp(x, -disp)
 
+    def warpV2(self, x, disp):
+        batch_size, height, width, channels = (
+            _get_dim(x, 0),
+            _get_dim(x, 1),
+            _get_dim(x, 2),
+            _get_dim(x, 3),
+        )
+
+        xx = tf.range(0, width)
+        xx = tf.reshape(xx, (1, -1))
+        xx = tf.tile(xx,multiples=(height, 1))
+        xx = tf.reshape(xx, (1,height, width, 1))
+        xx = tf.tile(xx, multiples=(batch_size,1,1,1))
+        xx = tf.cast(xx, tf.float32)
+
+        yy = tf.range(0, height)
+        yy = tf.reshape(yy, (1, -1))
+        yy = tf.tile(yy, multiples=(1, width))
+        yy = tf.reshape(yy, (1, height, width, 1))
+        yy = tf.tile(yy, multiples=(batch_size,1,1,1))
+        yy = tf.cast(yy, tf.float32)
+
+        vgrid = tf.concat([xx,yy], axis=-1)
+
+        vgrid1 = vgrid[:,:,:,:1] - disp
+        vgrid = tf.concat([vgrid1, vgrid[:,:,:,1:]], axis=-1)
+
+        import pdb; pdb.set_trace()
+        return vgrid
     
     def _build_volume_2d(self, feat_l, feat_r, maxdisp, stride=1):
         assert maxdisp % stride == 0  # Assume maxdisp is multiple of stride
@@ -154,7 +183,8 @@ class DisparityNetwork(keras.layers.Layer):
                 wflow = tf.image.resize(
                     pred[scale-1], 
                     (feats_l[scale].shape[1], feats_l[scale].shape[2]
-                )) * feats_l[scale].shape[1] / self.height
+                ))
+                wflow = wflow * feats_l[scale].shape[1] / self.height
 
 
                 cost = self._build_volume_2d3(
@@ -188,7 +218,8 @@ class DisparityNetwork(keras.layers.Layer):
                 disp_up = tf.image.resize(pred_low_res, [self.height, self.width])
                 pred.append(disp_up)
 
-        pred = [self.bnorms[i](x) for i,x in enumerate(pred)]
+        #pred = [self.bnorms[i](x) for i,x in enumerate(pred)]
+        #pred = [tf.image.per_image_standardization(x) for x in pred]
         return pred
 
 @keras.utils.register_keras_serializable(package='AnyNet')

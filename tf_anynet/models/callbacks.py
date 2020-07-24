@@ -68,7 +68,7 @@ class DepthMapImageCallback(keras.callbacks.Callback):
 
                     imgsplot = [ 
                         plot_to_image(samples[i][1]) ] \
-                        + [plot_to_image(v[i])#, per_image_standardization=True) 
+                        + [plot_to_image(v[i], per_image_standardization=True) 
                         for v in values
                     ]
                     tf.summary.image(tag, imgsplot, step=epoch, max_outputs=10)

@@ -11,15 +11,11 @@ def conv2d_block(
     initializer_cls=keras.initializers.VarianceScaling, 
     dilation_rate=1, 
     batch_norm=True,
-    momentum=0.9,
-    epsilon=1e-5,
+    momentum=0.99,
+    epsilon=1e-3,
     ):
     
     if batch_norm:
-        x = layers.BatchNormalization(
-                momentum=momentum,
-                epsilon=epsilon,
-        )(inputs)
         x = layers.Conv2D(
             out_channels,
             kernel_size=kernel_size,
@@ -29,6 +25,10 @@ def conv2d_block(
             activation='relu',
             dilation_rate=dilation_rate,
             kernel_initializer=initializer_cls()
+        )(inputs)
+        x = layers.BatchNormalization(
+                momentum=momentum,
+                epsilon=epsilon,
         )(x)
         return x
     else:
@@ -83,7 +83,7 @@ class UnetUp2(keras.layers.Layer):
 
 @keras.utils.register_keras_serializable(package='AnyNet')
 class FeatureExtractor(keras.layers.Layer):
-    def __init__(self, init_filters, nblocks, batch_size):
+    def __init__(self, init_filters, nblocks, *args, **kwargs):
         '''Downsample inputs, extract features, upsample extracted features
 
             Args:
@@ -99,21 +99,18 @@ class FeatureExtractor(keras.layers.Layer):
         self.initializer_cls = keras.initializers.VarianceScaling
         self.init_filters = init_filters
         self.nblocks = nblocks
-        self.batch_size = batch_size
 
     def get_config(self):
         config = {
             'init_filters': self.init_filters,
             'nblocks': self.nblocks,
-            'batch_size': self.batch_size
         }
         config.update(super().get_config())
 
         return config
     def build(self, input_shape):
  
-        self.input_layer = layers.Input(shape=input_shape[1:], batch_size=input_shape[0], name="input_feature_ext")
-
+        self.input_layer = layers.Input(shape=input_shape[1:], name="input_feature_ext")
         self.block0 = self._make_block0(
             self.init_filters,
             self.nblocks,
@@ -184,14 +181,17 @@ class FeatureExtractor(keras.layers.Layer):
 
     def _make_block0(self, out_channels, nblocks, initializer_cls):
         
+        bnorm_input_layer = layers.BatchNormalization()(self.input_layer)
+
         conv_input = layers.Conv2D(
             out_channels, 
             kernel_size=3, 
             strides=1, 
-            #padding='same',
+            padding='same',
             use_bias=False,
             kernel_initializer=initializer_cls(),
-        )(self.input_layer)
+        #)(self.input_layer)
+        )(bnorm_input_layer)
 
         downsample_conv = conv2d_block(
             inputs=conv_input,
