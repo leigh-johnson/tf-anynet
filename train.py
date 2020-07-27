@@ -10,6 +10,7 @@ from tf_anynet.models.callbacks import DepthMapImageCallback
 from tf_anynet.models.anynet_fn import AnyNet
 from tf_anynet.models.metrics import (
     L1DisparityMaskLoss,
+    masked_pixel_ratio
 )
 from tf_anynet.dataset import TFRecordsDataset, random_crop, center_crop, to_x_y
 
@@ -20,19 +21,17 @@ def parse_args():
     parser = argparse.ArgumentParser(description='AnyNet with Flyingthings3d')
     parser.add_argument('--seed', type=int, default=12345, help='Random seed (training dataset shuffle)')
     parser.add_argument('--global_max_disp', type=int, default=192, help='Global maximum disparity (pixels)')
-    parser.add_argument('--local_max_disps', type=int, nargs='+', default=[12,8,4], help='Maximum disparity localized per Disparity Net stage')
+    parser.add_argument('--local_max_disps', type=int, nargs='+', default=[24, 16, 8], help='Maximum disparity localized per Disparity Net stage')
     parser.add_argument('--loss_weights', type=float, nargs='+', default=[0.25, 0.5, 1., 1.])
     parser.add_argument('--datapath', default='dataset/',
                         help='datapath')
-    parser.add_argument('--epochs', type=int, default=1000,
+    parser.add_argument('--epochs', type=int, default=200,
                         help='number of epochs to train')
-    parser.add_argument('--train_bsize', type=int, default=160,
+    parser.add_argument('--train_bsize', type=int, default=92,
                         help='batch size for training')
-    parser.add_argument('--resume', type=str, default=None,
-                        help='resume path')
     parser.add_argument('--checkpoint', type=str, default=None,
                         help='resume path')                        
-    parser.add_argument('--learning_rate', type=float, default=1e-2,
+    parser.add_argument('--learning_rate', type=float, default=5e-4,
                         help='learning rate')
     parser.add_argument('--with_spn', action='store_true', help='with spn network or not')
     parser.add_argument('--unet_conv2d_filters', type=int, default=1, help='Initial num Conv2D output filters of Unet feature extractor')
@@ -45,7 +44,7 @@ def parse_args():
     parser.add_argument('--train_ds', type=str, default='flyingthings_train.shard*')
     parser.add_argument('--test_ds', type=str, default='flyingthings_test.shard*')
     parser.add_argument('--epsilon', type=float, default=1e-07)
-
+    parser.add_argument('--mlflow', action='store_true', help='Initialize MLFlow experiment logging')
     return parser.parse_args()
 
 def main():
@@ -99,27 +98,27 @@ def main():
 
     optimizer = keras.optimizers.Adam(learning_rate=args.learning_rate, epsilon=args.epsilon)
     
-    if args.resume:
-        log_dir = f'{args.resume}'
+    if args.checkpoint:
+        # --checkpoint logs/2020-07-17T02:57:23.979082/model.01-57.78.hdf5
+        log_name = args.checkpoint.split('/')
+        log_dir = '/'.join(log_name[-1])
 
     else:
-        log_dir = str(datetime.now()).replace(' ', 'T')
-        log_dir = f'./logs/{log_dir}'
-
-    
-    # metrics = [
-    #     keras.metrics.RootMeanSquaredError(name="rmse"),
-    # ]
+        log_name = str(datetime.now()).replace(' ', 'T')
+        log_dir = f'./logs/{log_name}'
 
     rmse0 = keras.metrics.RootMeanSquaredError(name="rmse_0")
     rmse1 = keras.metrics.RootMeanSquaredError(name="rmse_1")
     rmse2 = keras.metrics.RootMeanSquaredError(name="rmse_2")
     rmse_agg = keras.metrics.RootMeanSquaredError(name="rmse_agg")
 
+    def included_pixel_avg(y_true, y_pred):
+        return masked_pixel_ratio(y_true, args.global_max_disp)
+
     metrics = {
         'disparity-0': [rmse0, rmse_agg],
         'disparity-1': [rmse1, rmse_agg],
-        'disparity-2': [rmse2, rmse_agg],
+        'disparity-2': [rmse2, rmse_agg, included_pixel_avg],
     }
 
     model.compile(
@@ -139,7 +138,7 @@ def main():
     )
 
     callbacks = [
-        DepthMapImageCallback(val_ds, args.train_bsize, 32, log_dir=log_dir),
+        DepthMapImageCallback(val_ds, args.train_bsize, args.train_bsize//2, frequency=10, log_dir=log_dir),
         keras.callbacks.TensorBoard(
             log_dir=log_dir,
             histogram_freq=5,
@@ -147,7 +146,7 @@ def main():
         ),
         tf.keras.callbacks.ModelCheckpoint(
             filepath=log_dir+'/model.{epoch:02d}-{val_loss:.2f}.hdf5',
-            #save_best_only=True,
+            save_best_only=True,
             mode='min',
             save_weights_only=False,
             verbose=1
@@ -157,13 +156,34 @@ def main():
     if args.checkpoint:
         model.load_weights(args.checkpoint)
 
-    model.fit(
-        train_ds,
-        epochs=args.epochs, 
-        batch_size=args.train_bsize,
-        validation_data=test_ds,
-        callbacks=callbacks
-    )
+    if args.mlflow:
+        import mlflow.tensorflow
+        from git.repo.base import Repo 
 
+        repo = Repo('.')
+        diff = repo.git.diff('HEAD~1')
+        f_diff = ['\t'] + diff.splitlines()
+        f_diff = '\n\t'.join(f_diff)
+        with mlflow.start_run(run_name=log_name):
+            mlflow.log_params(vars(args))
+            mlflow.tensorflow.autolog()
+            mlflow.set_tag('mlflow.note.content', f_diff)
+            mlflow.set_tag('tensorboard', log_name)
+            model.fit(
+                train_ds,
+                epochs=args.epochs, 
+                batch_size=args.train_bsize,
+                validation_data=test_ds,
+                callbacks=callbacks,
+                initial_epoch=args.epochs if args.checkpoint else 0
+            )
+    else:
+        model.fit(
+            train_ds,
+            epochs=args.epochs, 
+            batch_size=args.train_bsize,
+            validation_data=test_ds,
+            callbacks=callbacks
+        )
 if __name__ == '__main__':
     main()

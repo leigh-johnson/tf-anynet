@@ -1,0 +1,8 @@
+name: TF-AnyNet
+
+entry_points:
+  main:
+    #parameters:
+    #   regularization: {type: float, default: 0.1}
+    # command: "python train.py -r {regularization} {data_file}"
+    command: "python train.py --mlflow"

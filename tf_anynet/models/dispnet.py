@@ -3,6 +3,7 @@ from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow_addons.image import dense_image_warp
 
+from .transformer import bilinear_sampler, sampling_grid_generator
 from .regularization import Conv3DRegularizer
 
 @keras.utils.register_keras_serializable(package='AnyNet')
@@ -30,6 +31,7 @@ class DisparityNetwork(keras.layers.Layer):
         self.width = None
         self.height = None
         self.cost2d = None
+        self.vgrid = None
 
         self.volume_postprocess = []
         self.bnorms = [keras.layers.BatchNormalization() for n in range(0,stages)]
@@ -57,35 +59,21 @@ class DisparityNetwork(keras.layers.Layer):
     def warp(self, x, disp):
         return dense_image_warp(x, -disp)
 
-    def warpV2(self, x, disp):
-        batch_size, height, width, channels = (
-            _get_dim(x, 0),
-            _get_dim(x, 1),
-            _get_dim(x, 2),
-            _get_dim(x, 3),
+    def warp_v2(self, x, disp):
+
+        batch_size, height, width = (
+            tf.shape(x)[0],
+            tf.shape(x)[1],
+            tf.shape(x)[2],
         )
+        vgrid = sampling_grid_generator(height, width, batch_size)
 
-        xx = tf.range(0, width)
-        xx = tf.reshape(xx, (1, -1))
-        xx = tf.tile(xx,multiples=(height, 1))
-        xx = tf.reshape(xx, (1,height, width, 1))
-        xx = tf.tile(xx, multiples=(batch_size,1,1,1))
-        xx = tf.cast(xx, tf.float32)
+        yy = vgrid[:,:1,:,:] - disp
 
-        yy = tf.range(0, height)
-        yy = tf.reshape(yy, (1, -1))
-        yy = tf.tile(yy, multiples=(1, width))
-        yy = tf.reshape(yy, (1, height, width, 1))
-        yy = tf.tile(yy, multiples=(batch_size,1,1,1))
-        yy = tf.cast(yy, tf.float32)
-
-        vgrid = tf.concat([xx,yy], axis=-1)
-
-        vgrid1 = vgrid[:,:,:,:1] - disp
-        vgrid = tf.concat([vgrid1, vgrid[:,:,:,1:]], axis=-1)
-
-        import pdb; pdb.set_trace()
-        return vgrid
+        xx = 2.0 * vgrid[:, 0, :, :] / max(width - 1, 1) - 1.0
+        yy = 2.0 * yy / max(height - 1, 1) - 1.0
+        output = bilinear_sampler(x, xx, yy)
+        return output
     
     def _build_volume_2d(self, feat_l, feat_r, maxdisp, stride=1):
         assert maxdisp % stride == 0  # Assume maxdisp is multiple of stride
@@ -96,6 +84,7 @@ class DisparityNetwork(keras.layers.Layer):
             )
             self.cost2d = cost
         else:
+            self.cost2d = self.cost2d.assign(tf.zeros((self.batch_size, feat_l.shape[1], feat_l.shape[2], maxdisp//stride)))
             cost = self.cost2d
 
         for i in range(0, maxdisp, stride):
@@ -200,7 +189,6 @@ class DisparityNetwork(keras.layers.Layer):
                 start = -self.local_max_disps[scale]+1
                 end = self.local_max_disps[scale]
                 pred_low_res = DisparityRegression(start, end)(softmax)
-                #pred_low_res = self.bnorms[scale](pred_low_res)
                 disp_up = tf.image.resize(pred_low_res, [ self.height, self.width ])
                 pred.append(disp_up+pred[scale-1])
             else:
@@ -214,12 +202,9 @@ class DisparityNetwork(keras.layers.Layer):
                 pred_low_res = DisparityRegression(
                     0, self.local_max_disps[scale]
                 )(softmax)
-                #pred_low_res = self.bnorms[scale](pred_low_res)
                 disp_up = tf.image.resize(pred_low_res, [self.height, self.width])
                 pred.append(disp_up)
 
-        #pred = [self.bnorms[i](x) for i,x in enumerate(pred)]
-        #pred = [tf.image.per_image_standardization(x) for x in pred]
         return pred
 
 @keras.utils.register_keras_serializable(package='AnyNet')

@@ -6,6 +6,7 @@ cache/
 data/
 logs/
 logs-bak/
+mlruns/
 ### Python ###
 # Byte-compiled / optimized / DLL files
 __pycache__/
