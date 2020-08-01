@@ -2,6 +2,7 @@
 import tensorflow as tf
 from tensorflow import keras
 
+
 def masked_pixel_ratio(disp, global_max_disp):
     excluded = tf.reduce_sum(tf.cast(disp > global_max_disp, tf.float32))
     included = tf.reduce_sum(tf.cast(disp < global_max_disp, tf.float32))
@@ -30,20 +31,12 @@ class L1DisparityMaskLoss(keras.losses.Loss):
     def __call__(self, disp, logits, sample_weight=None):
         
         mask = disp < self.global_max_disp
-        summed = tf.reduce_sum(tf.cast(mask, tf.float32))
         
         # All pixels in ground truth had a disparity value > 192
         # This is possible in FlyingThings3
         loss = self.loss(logits[mask], disp[mask])
 
         if sample_weight:
-            return tf.cond(
-                tf.equal(summed, 0),
-                true_fn=lambda : 0.0,
-                false_fn=lambda : loss * sample_weight
-            )
-        return tf.cond(
-                tf.equal(summed, 0),
-                true_fn=lambda : 0.0,
-                false_fn=lambda : loss
-        )
+            loss * sample_weight
+            
+        return loss

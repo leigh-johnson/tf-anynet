@@ -2,7 +2,9 @@ name: TF-AnyNet
 
 entry_points:
   main:
-    #parameters:
-    #   regularization: {type: float, default: 0.1}
-    # command: "python train.py -r {regularization} {data_file}"
     command: "python train.py --mlflow"
+  resume:
+    parameters:
+      checkpoint: {type: str }
+      initial_epoch: {type: int, default: 0}
+    command: "python train.py --mlflow --checkpoint {checkpoint} --initial_epoch {initial_epoch}"

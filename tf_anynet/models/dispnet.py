@@ -28,13 +28,13 @@ class DisparityNetwork(keras.layers.Layer):
         self.global_max_disp = global_max_disp
         self.stages = stages
         self.batch_size = batch_size
-        self.width = None
-        self.height = None
+        self.width = 512
+        self.height = 256
         self.cost2d = None
         self.vgrid = None
 
         self.volume_postprocess = []
-        self.bnorms = [keras.layers.BatchNormalization() for n in range(0,stages)]
+        #self.bnorms = [keras.layers.BatchNormalization() for n in range(0,stages)]
 
         for i in range(len(disp_conv3d_growth_rate)):
             regularizer = Conv3DRegularizer(
@@ -51,7 +51,9 @@ class DisparityNetwork(keras.layers.Layer):
             'local_max_disps': self.local_max_disps,
             'global_max_disp': self.global_max_disp,
             'stages': self.stages,
-            'batch_size': self.batch_size
+            'batch_size': self.batch_size,
+            'width': self.width,
+            'height': self.height,
         }
         config.update(super().get_config())
         return config
@@ -79,13 +81,16 @@ class DisparityNetwork(keras.layers.Layer):
         assert maxdisp % stride == 0  # Assume maxdisp is multiple of stride
 
         if self.cost2d is None:
-            cost = tf.Variable(
-                lambda : tf.zeros((self.batch_size, feat_l.shape[1], feat_l.shape[2], maxdisp//stride))
+            cost = self.add_weight(
+                initializer=tf.keras.initializers.Zeros(),
+                shape=(self.batch_size, feat_l.shape[1], feat_l.shape[2], maxdisp//stride),
+                trainable=False,
+                name='cost_volume_2d',
+                use_resource=True
             )
             self.cost2d = cost
         else:
-            self.cost2d = self.cost2d.assign(tf.zeros((self.batch_size, feat_l.shape[1], feat_l.shape[2], maxdisp//stride)))
-            cost = self.cost2d
+            cost = self.cost2d.assign(tf.zeros((self.batch_size, feat_l.shape[1], feat_l.shape[2], maxdisp//stride)))
 
         for i in range(0, maxdisp, stride):
             reduced = tf.reduce_sum(

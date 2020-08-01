@@ -25,13 +25,13 @@ def parse_args():
     parser.add_argument('--loss_weights', type=float, nargs='+', default=[0.25, 0.5, 1., 1.])
     parser.add_argument('--datapath', default='dataset/',
                         help='datapath')
-    parser.add_argument('--epochs', type=int, default=200,
+    parser.add_argument('--epochs', type=int, default=1000,
                         help='number of epochs to train')
     parser.add_argument('--train_bsize', type=int, default=92,
                         help='batch size for training')
     parser.add_argument('--checkpoint', type=str, default=None,
                         help='resume path')                        
-    parser.add_argument('--learning_rate', type=float, default=5e-4,
+    parser.add_argument('--learning_rate', type=float, default=1e-3,
                         help='learning rate')
     parser.add_argument('--with_spn', action='store_true', help='with spn network or not')
     parser.add_argument('--unet_conv2d_filters', type=int, default=1, help='Initial num Conv2D output filters of Unet feature extractor')
@@ -45,6 +45,7 @@ def parse_args():
     parser.add_argument('--test_ds', type=str, default='flyingthings_test.shard*')
     parser.add_argument('--epsilon', type=float, default=1e-07)
     parser.add_argument('--mlflow', action='store_true', help='Initialize MLFlow experiment logging')
+    parser.add_argument('--initial_epoch', type=int, default=0, help="Begin epoch counter at this number")
     return parser.parse_args()
 
 def main():
@@ -72,12 +73,14 @@ def main():
         .map(random_crop, num_parallel_calls=4)\
         .shuffle(args.train_bsize*8, reshuffle_each_iteration=True)\
         .batch(args.train_bsize,drop_remainder=True)\
-        .prefetch(3)
+        .prefetch(3)\
+        .take(args.train_bsize*2)
     test_cache_file = args.test_ds.split('.')[0]
     test_ds  = TFRecordsDataset(args.test_ds, training=True)\
         .map(center_crop, num_parallel_calls=4)\
         .batch(args.train_bsize, drop_remainder=True)\
-        .prefetch(3)
+        .prefetch(3)\
+        .take(args.train_bsize*2)
     
 
     val_ds = test_ds.take(1)
@@ -101,7 +104,7 @@ def main():
     if args.checkpoint:
         # --checkpoint logs/2020-07-17T02:57:23.979082/model.01-57.78.hdf5
         log_name = args.checkpoint.split('/')
-        log_dir = '/'.join(log_name[-1])
+        log_dir = '/'.join(log_name[:2])
 
     else:
         log_name = str(datetime.now()).replace(' ', 'T')
@@ -145,16 +148,20 @@ def main():
             profile_batch='60,70'
         ),
         tf.keras.callbacks.ModelCheckpoint(
-            filepath=log_dir+'/model.{epoch:02d}-{val_loss:.2f}.hdf5',
+            #filepath=log_dir+'/model.{epoch:02d}-{val_loss:.2f}.hdf5',
+            filepath=log_dir+'/{epoch:02d}-{val_loss:.2f}.ckpt', #+'/model.{epoch:02d}-{val_loss:.2f}.hdf5'
             save_best_only=True,
             mode='min',
-            save_weights_only=False,
+            save_weights_only=True,
             verbose=1
         )
     ]
 
     if args.checkpoint:
-        model.load_weights(args.checkpoint)
+        weights_file = tf.train.latest_checkpoint(args.checkpoint)
+
+        model.load_weights(weights_file)
+        #model = tf.keras.models.load_model(args.checkpoint)
 
     if args.mlflow:
         import mlflow.tensorflow
@@ -175,7 +182,7 @@ def main():
                 batch_size=args.train_bsize,
                 validation_data=test_ds,
                 callbacks=callbacks,
-                initial_epoch=args.epochs if args.checkpoint else 0
+                initial_epoch=args.initial_epoch
             )
     else:
         model.fit(
@@ -183,7 +190,8 @@ def main():
             epochs=args.epochs, 
             batch_size=args.train_bsize,
             validation_data=test_ds,
-            callbacks=callbacks
+            callbacks=callbacks,
+            initial_epoch=args.initial_epoch
         )
 if __name__ == '__main__':
     main()
