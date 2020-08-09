@@ -24,7 +24,7 @@ def conv3d_block(
             use_bias=False,
             activation='relu',
             dilation_rate=dilation_rate,
-            kernel_initializer=initializer_cls()
+            #kernel_initializer=initializer_cls()
         )(inputs)
         x = layers.BatchNormalization(
                 momentum=momentum,
@@ -39,7 +39,7 @@ def conv3d_block(
             padding=padding,
             activation='relu',
             dilation_rate=dilation_rate,
-            kernel_initializer=initializer_cls()
+            #kernel_initializer=initializer_cls()
         )(inputs)
 
 

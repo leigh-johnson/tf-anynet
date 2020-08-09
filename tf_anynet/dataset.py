@@ -120,6 +120,7 @@ class DrivingDataset(tf.data.Dataset):
 
     DATA_ROOT =  '/home/leigh/torrents/driving'
 
+    SAMPLES = 2200
 
     def __new__(self, training=False):
         self.training = training
@@ -136,7 +137,7 @@ class DrivingDataset(tf.data.Dataset):
 
         ds = tf.data.Dataset.zip(
             (img_files_l, img_files_r, disp_files_l)
-        )
+        ).shuffle(self.SAMPLES)
         return ds
 
 # Create a description of the features.

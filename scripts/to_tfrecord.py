@@ -172,8 +172,8 @@ def pack(dataset, file):
       if i % 100 == 0:
         print(f'Finished {i} / {ds_length}')
 
-@click.option('-f', '--file', default='data/flyingthings_test.tfrecords.gz')
-@click.option('--shards', default=8)
+@click.option('-f', '--file', default='data/driving.tfrecords.gz')
+@click.option('--shards', default=6)
 @cli.command()
 def shard(file, shards):
   raw_dataset = tf.data.TFRecordDataset(file, compression_type="GZIP", num_parallel_reads=tf.data.experimental.AUTOTUNE)

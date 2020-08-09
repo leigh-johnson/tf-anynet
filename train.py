@@ -20,19 +20,23 @@ SAMPLES=2200
 def parse_args():
     parser = argparse.ArgumentParser(description='AnyNet with Flyingthings3d')
     parser.add_argument('--seed', type=int, default=12345, help='Random seed (training dataset shuffle)')
-    parser.add_argument('--global_max_disp', type=int, default=192, help='Global maximum disparity (pixels)')
+    parser.add_argument('--global_max_disp', type=int, default=256, help='Global maximum disparity (pixels)')
     parser.add_argument('--local_max_disps', type=int, nargs='+', default=[24, 16, 8], help='Maximum disparity localized per Disparity Net stage')
     parser.add_argument('--loss_weights', type=float, nargs='+', default=[0.25, 0.5, 1., 1.])
     parser.add_argument('--datapath', default='dataset/',
                         help='datapath')
-    parser.add_argument('--epochs', type=int, default=1000,
+    parser.add_argument('--epochs', type=int, default=400,
                         help='number of epochs to train')
     parser.add_argument('--train_bsize', type=int, default=92,
                         help='batch size for training')
     parser.add_argument('--checkpoint', type=str, default=None,
                         help='resume path')                        
-    parser.add_argument('--learning_rate', type=float, default=1e-3,
+    parser.add_argument('--learning_rate', type=float, default=5e-4,
                         help='learning rate')
+    parser.add_argument('--learning_rate_end', type=float, default=1e-3,
+                        help='learning rate')
+    parser.add_argument('--learning_rate_decay_steps', type=int, default=3000,
+                        help='learning rate')                       
     parser.add_argument('--with_spn', action='store_true', help='with spn network or not')
     parser.add_argument('--unet_conv2d_filters', type=int, default=1, help='Initial num Conv2D output filters of Unet feature extractor')
     parser.add_argument('--unet_nblocks', type=int, default=2, help='number of blocks in each conv stage')
@@ -43,9 +47,12 @@ def parse_args():
     parser.add_argument('--cspn_conv3d_step', type=int, default=24, help='initial channels for spnet')
     parser.add_argument('--train_ds', type=str, default='flyingthings_train.shard*')
     parser.add_argument('--test_ds', type=str, default='flyingthings_test.shard*')
+    #parser.add_argument('--train_ds', type=str, default='driving.shard-[1-5]*')
+    #parser.add_argument('--test_ds', type=str, default='driving.shard-0.gz')
     parser.add_argument('--epsilon', type=float, default=1e-07)
     parser.add_argument('--mlflow', action='store_true', help='Initialize MLFlow experiment logging')
     parser.add_argument('--initial_epoch', type=int, default=0, help="Begin epoch counter at this number")
+    parser.add_argument('--resume', action='store_true', help='with spn network or not')
     return parser.parse_args()
 
 def main():
@@ -75,6 +82,7 @@ def main():
         .batch(args.train_bsize,drop_remainder=True)\
         .prefetch(3)\
         .take(args.train_bsize*2)
+
     test_cache_file = args.test_ds.split('.')[0]
     test_ds  = TFRecordsDataset(args.test_ds, training=True)\
         .map(center_crop, num_parallel_calls=4)\
@@ -99,9 +107,18 @@ def main():
     input_shape = train_ds.element_spec[0][0].shape
     model = model_builder.build(input_shape=input_shape)
 
-    optimizer = keras.optimizers.Adam(learning_rate=args.learning_rate, epsilon=args.epsilon)
+    initial_learning_rate = args.learning_rate
+    end_learning_rate = args.learning_rate_end
+    decay_steps = args.learning_rate_end
+    learning_rate_fn = tf.keras.optimizers.schedules.PolynomialDecay(
+        initial_learning_rate,
+        decay_steps,
+        end_learning_rate,
+        power=0.5
+    )
+    optimizer = keras.optimizers.Adam(learning_rate=learning_rate_fn, epsilon=args.epsilon)
     
-    if args.checkpoint:
+    if args.resume:
         # --checkpoint logs/2020-07-17T02:57:23.979082/model.01-57.78.hdf5
         log_name = args.checkpoint.split('/')
         log_dir = '/'.join(log_name[:2])
@@ -141,7 +158,7 @@ def main():
     )
 
     callbacks = [
-        DepthMapImageCallback(val_ds, args.train_bsize, args.train_bsize//2, frequency=10, log_dir=log_dir),
+        DepthMapImageCallback(val_ds, args.train_bsize, args.train_bsize, frequency=10, log_dir=log_dir),
         keras.callbacks.TensorBoard(
             log_dir=log_dir,
             histogram_freq=5,
@@ -173,7 +190,7 @@ def main():
         f_diff = '\n\t'.join(f_diff)
         with mlflow.start_run(run_name=log_name):
             mlflow.log_params(vars(args))
-            mlflow.tensorflow.autolog()
+            mlflow.tensorflow.autolog(every_n_iter=10)
             mlflow.set_tag('mlflow.note.content', f_diff)
             mlflow.set_tag('tensorboard', log_name)
             model.fit(

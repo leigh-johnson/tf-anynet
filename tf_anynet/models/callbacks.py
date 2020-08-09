@@ -16,7 +16,7 @@ def plot_to_image(img_data, per_image_standardization=False):
        cmap = 'turbo'
     else:
         cmap = 'turbo'
-    plt.imshow(tf.squeeze(img_data), cmap=cmap, interpolation='nearest') #cmap=plt.cm.binary,
+    plt.imshow(tf.squeeze(img_data), cmap=cmap, interpolation='bilinear') #cmap=plt.cm.binary,
     
     buf = io.BytesIO()
     plt.savefig(buf, format='png')
@@ -68,7 +68,7 @@ class DepthMapImageCallback(keras.callbacks.Callback):
 
                     imgsplot = [ 
                         plot_to_image(samples[i][1]) ] \
-                        + [plot_to_image(v[i], per_image_standardization=True) 
+                        + [plot_to_image(v[i])#, per_image_standardization=True) 
                         for v in values
                     ]
                     tf.summary.image(tag, imgsplot, step=epoch, max_outputs=10)
